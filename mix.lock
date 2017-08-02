@@ -1,0 +1,2 @@
+%{"fuse": {:hex, :fuse, "2.4.0", "499ab65d3b1d291909973e1c25bdc55a17379fb26899f25eb68b6437a880de1b", [], [], "hexpm"},
+  "retry": {:hex, :retry, "0.7.0", "894a32223433501b33e95cc54bda72f3d162a930d2eba749ed7766f05721986d", [], [], "hexpm"}}

@@ -1,6 +1,11 @@
 # ExternalService
 
-**TODO: Add description**
+An Elixir library for safely using external services using customizable retry
+logic and the circuit breaker pattern.
+
+## Documentation
+
+Check out the [API reference](https://hexdocs.pm/external_service/api-reference.html) for the latest documentation.
 
 ## Installation
 
@@ -9,7 +14,7 @@ by adding `external_service` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
-  [{:external_service, "~> 0.1.0"}]
+  [{:external_service, "~> 0.5.0"}]
 end
 ```
 
