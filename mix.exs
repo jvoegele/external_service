@@ -26,6 +26,7 @@ defmodule ExternalService.Mixfile do
     [
       {:fuse, "~> 2.4"},
       {:retry, "~> 0.7.0"},
+      {:ex_doc, "~> 0.14", only: :dev, runtime: false},
     ]
   end
 
