@@ -5,7 +5,7 @@ logic and the circuit breaker pattern.
 
 ## Documentation
 
-Check out the [API reference](https://hexdocs.pm/external_service/api-reference.html) for the latest documentation.
+See [my blog post](https://ropig.com/blog/use-external-services-safely-reliably-elixir-applications/) for overview documentation, and then check out the [API reference](https://hexdocs.pm/external_service/api-reference.html) for full details.
 
 ## Installation
 
