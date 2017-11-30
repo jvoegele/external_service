@@ -28,6 +28,10 @@ defmodule ExternalService do
   @type fuse_name :: atom()
   @type retriable_function_result :: :retry | {:retry, reason::any()} | function_result::any()
   @type retriable_function :: (() -> retriable_function_result())
+  @type retries_exhausted :: {:error, {:retries_exhausted, reason::any}}
+  @type fuse_blown :: {:error, {:fuse_blown, fuse_name}}
+  @type fuse_not_found :: {:error, {:fuse_not_found, fuse_name}}
+  @type error :: retries_exhausted | fuse_blown | fuse_not_found
 
   @typedoc """
   Options used for controlling circuit breaker behavior.
@@ -64,11 +68,7 @@ defmodule ExternalService do
   raising a `RuntimeError`. Any other result is considered successful so the operation will not be
   retried and the result of the function will be returned as the result of `call`.
   """
-  @spec call(fuse_name(), RetryOptions.t, retriable_function()) ::
-    {:error, {:retries_exhausted, reason::any()}} |
-    {:error, {:fuse_blown, fuse_name()}} |
-    {:error, {:fuse_not_found, fuse_name()}} |
-    function_result::any()
+  @spec call(fuse_name(), RetryOptions.t, retriable_function()) :: error | function_result::any
   def call(fuse_name, retry_opts \\ %RetryOptions{}, function) do
     case do_retry(fuse_name, retry_opts, function) do
       {:no_retry, result} -> result
