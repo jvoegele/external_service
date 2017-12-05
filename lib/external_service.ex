@@ -25,6 +25,18 @@ defmodule ExternalService do
     }
   end
 
+  defmodule RetriesExhausted do
+    defexception [:message]
+  end
+
+  defmodule FuseBlown do
+    defexception [:message]
+  end
+
+  defmodule FuseNotFound do
+    defexception [:message]
+  end
+
   @type fuse_name :: atom()
   @type retriable_function_result :: :retry | {:retry, reason::any()} | function_result::any()
   @type retriable_function :: (() -> retriable_function_result())
@@ -75,6 +87,27 @@ defmodule ExternalService do
       {:error, :retry} -> {:error, {:retries_exhausted, :reason_unknown}}
       {:error, {:retry, reason}} -> {:error, {:retries_exhausted, reason}}
       result -> result
+    end
+  end
+
+  @doc """
+  Like `call/3`, but raises an exception if retries are exhausted or the fuse is blown.
+  """
+  @spec call!(fuse_name(), RetryOptions.t, retriable_function()) ::
+    function_result::any | no_return
+  def call!(fuse_name, retry_opts \\ %RetryOptions{}, function) do
+    case do_retry(fuse_name, retry_opts, function) do
+      {:no_retry, result} ->
+        result
+      {:error, :retry} ->
+        raise ExternalService.RetriesExhausted, message: "fuse_name: #{fuse_name}"
+      {:error, {:retry, reason}} ->
+        raise ExternalService.RetriesExhausted,
+          message: "reason: #{inspect reason}, fuse_name: #{fuse_name}"
+      {:error, {:fuse_blown, fuse_name}} ->
+        raise ExternalService.FuseBlown, message: Atom.to_string(fuse_name)
+      {:error, {:fuse_not_found, fuse_name}} ->
+        raise ExternalService.FuseNotFound, message: Atom.to_string(fuse_name)
     end
   end
 
@@ -146,6 +179,8 @@ defmodule ExternalService do
     {:no_retry, function_result::any()} |
     {:error, :retry} |
     {:error, {:retry, reason::any()}} |
+    fuse_blown |
+    fuse_not_found |
     function_result::any()
   defp do_retry(fuse_name, retry_opts, function) do
     retry(with: apply_retry_options(retry_opts)) do
@@ -176,8 +211,8 @@ defmodule ExternalService do
     end)
   end
 
-  @spec try_function(atom(), (() -> any())) ::
-    {:error, {:retry, any()}} | {:error, :retry} | {:no_retry, any()}
+  @spec try_function(atom, retriable_function) ::
+    {:error, {:retry, any}} | {:error, :retry} | {:no_retry, any} | no_return
   defp try_function(fuse_name, function) do
     case function.() do
       {:retry, reason} ->
