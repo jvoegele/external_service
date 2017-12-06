@@ -4,7 +4,7 @@ defmodule ExternalService.Mixfile do
   def project do
     [
       app: :external_service,
-      version: "0.5.1",
+      version: "0.6.0",
       description: "Elixir library for safely consuming external services using retry logic and circuit breakers",
       source_url: "https://github.com/jvoegele/external_service",
       elixir: "~> 1.4",

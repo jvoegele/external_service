@@ -14,7 +14,7 @@ by adding `external_service` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
-  [{:external_service, "~> 0.5.1"}]
+  [{:external_service, "~> 0.6.0"}]
 end
 ```
 
