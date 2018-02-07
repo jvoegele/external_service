@@ -17,7 +17,7 @@ defmodule ExternalServiceTest do
   describe "start" do
     test "installs a fuse" do
       ExternalService.start(@fuse_name)
-      assert :ok = :fuse.ask(@fuse_name, :sync)
+      assert :fuse.ask(@fuse_name, :sync) == :ok
     end
   end
 
@@ -35,7 +35,7 @@ defmodule ExternalServiceTest do
         :ok
       end)
 
-      assert 1 = Process.get(@fuse_name)
+      assert Process.get(@fuse_name) == 1
     end
 
     test "calls function again when it returns retry" do
@@ -44,7 +44,7 @@ defmodule ExternalServiceTest do
         :retry
       end)
 
-      assert @fuse_retries + 1 == Process.get(@fuse_name)
+      assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
     test "stops retrying on success" do
@@ -57,7 +57,7 @@ defmodule ExternalServiceTest do
         end
       end)
 
-      assert 2 == Process.get(@fuse_name)
+      assert Process.get(@fuse_name) == 2
     end
 
     test "calls function again when it raises an exception" do
@@ -66,7 +66,7 @@ defmodule ExternalServiceTest do
         raise "KABOOM!"
       end)
 
-      assert @fuse_retries + 1 == Process.get(@fuse_name)
+      assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
     test "returns fuse_blown when the fuse is blown by retries" do
@@ -75,7 +75,7 @@ defmodule ExternalServiceTest do
           :retry
         end)
 
-      assert {:error, {:fuse_blown, @fuse_name}} = res
+      assert res == {:error, {:fuse_blown, @fuse_name}}
     end
 
     test "returns fuse_blown when the fuse is blown by exceptions" do
@@ -84,7 +84,7 @@ defmodule ExternalServiceTest do
           raise "KABOOM!"
         end)
 
-      assert {:error, {:fuse_blown, @fuse_name}} = res
+      assert res == {:error, {:fuse_blown, @fuse_name}}
     end
 
     test "returns :error when retries are exhausted with :retry" do
@@ -93,7 +93,7 @@ defmodule ExternalServiceTest do
           :retry
         end)
 
-      assert {:error, {:retries_exhausted, :reason_unknown}} = res
+      assert res == {:error, {:retries_exhausted, :reason_unknown}}
     end
 
     test "returns :error when retries are exhausted with a reason" do
@@ -102,7 +102,7 @@ defmodule ExternalServiceTest do
           {:retry, "reason"}
         end)
 
-      assert {:error, {:retries_exhausted, "reason"}} = res
+      assert res == {:error, {:retries_exhausted, "reason"}}
     end
 
     test "propagates original exception when retries are exhausted by an exception" do
@@ -119,7 +119,7 @@ defmodule ExternalServiceTest do
           {:error, "reason"}
         end)
 
-      assert {:error, "reason"} = res
+      assert res == {:error, "reason"}
     end
   end
 
@@ -137,7 +137,7 @@ defmodule ExternalServiceTest do
         :ok
       end)
 
-      assert 1 = Process.get(@fuse_name)
+      assert Process.get(@fuse_name) == 1
     end
 
     test "calls function again when it returns retry" do
@@ -150,7 +150,7 @@ defmodule ExternalServiceTest do
         ExternalService.FuseBlown -> :ok
       end
 
-      assert @fuse_retries + 1 == Process.get(@fuse_name)
+      assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
     test "stops retrying on success" do
@@ -163,7 +163,7 @@ defmodule ExternalServiceTest do
         end
       end)
 
-      assert 2 == Process.get(@fuse_name)
+      assert Process.get(@fuse_name) == 2
     end
 
     test "calls function again when it raises an exception" do
@@ -176,7 +176,7 @@ defmodule ExternalServiceTest do
         ExternalService.FuseBlown -> :ok
       end
 
-      assert @fuse_retries + 1 == Process.get(@fuse_name)
+      assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
     test "raises FuseBlown when the fuse is blown by retries" do
@@ -215,7 +215,7 @@ defmodule ExternalServiceTest do
           {:error, "reason"}
         end)
 
-      assert {:error, "reason"} = res
+      assert res == {:error, "reason"}
     end
   end
 
@@ -226,7 +226,7 @@ defmodule ExternalServiceTest do
 
     test "returns a Task" do
       task = ExternalService.call_async(@fuse_name, fn -> :ok end)
-      assert :ok = Task.await(task)
+      assert Task.await(task) == :ok
     end
   end
 
