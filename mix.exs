@@ -5,10 +5,11 @@ defmodule ExternalService.Mixfile do
     [
       app: :external_service,
       version: "0.6.0",
-      description: "Elixir library for safely consuming external services using retry logic and circuit breakers",
+      description:
+        "Elixir library for safely consuming external services using retry logic and circuit breakers",
       source_url: "https://github.com/jvoegele/external_service",
       elixir: "~> 1.4",
-      start_permanent: Mix.env == :prod,
+      start_permanent: Mix.env() == :prod,
       package: package(),
       deps: deps()
     ]
@@ -27,7 +28,7 @@ defmodule ExternalService.Mixfile do
       {:fuse, "~> 2.4"},
       {:retry, "~> 0.8"},
       {:ex_doc, "~> 0.18", only: :dev, runtime: false},
-      {:dialyxir, "~> 0.5", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 0.5", only: [:dev, :test], runtime: false}
     ]
   end
 
