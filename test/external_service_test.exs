@@ -14,6 +14,19 @@ defmodule ExternalServiceTest do
     expiry: 1
   }
 
+  describe "uninitialized fuse" do
+    test "call returns :fuse_not_found error" do
+      result = ExternalService.call(:testing_nonexistent_fuse, fn -> :noop end)
+      assert result == {:error, {:fuse_not_found, :testing_nonexistent_fuse}}
+    end
+
+    test "call! raises FuseNotFoundError" do
+      assert_raise ExternalService.FuseNotFoundError, fn ->
+        ExternalService.call!(:testing_nonexistent_fuse, fn -> :noop end)
+      end
+    end
+  end
+
   describe "start" do
     test "installs a fuse" do
       ExternalService.start(@fuse_name)
@@ -147,7 +160,7 @@ defmodule ExternalServiceTest do
           :retry
         end)
       rescue
-        ExternalService.FuseBlown -> :ok
+        ExternalService.FuseBlownError -> :ok
       end
 
       assert Process.get(@fuse_name) == @fuse_retries + 1
@@ -173,32 +186,32 @@ defmodule ExternalServiceTest do
           raise "KABOOM!"
         end)
       rescue
-        ExternalService.FuseBlown -> :ok
+        ExternalService.FuseBlownError -> :ok
       end
 
       assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
-    test "raises FuseBlown when the fuse is blown by retries" do
-      assert_raise ExternalService.FuseBlown, Atom.to_string(@fuse_name), fn ->
+    test "raises FuseBlownError when the fuse is blown by retries" do
+      assert_raise ExternalService.FuseBlownError, Atom.to_string(@fuse_name), fn ->
         ExternalService.call!(@fuse_name, @retry_opts, fn -> :retry end)
       end
     end
 
-    test "raises FuseBlown when the fuse is blown by exceptions" do
-      assert_raise ExternalService.FuseBlown, Atom.to_string(@fuse_name), fn ->
+    test "raises FuseBlownError when the fuse is blown by exceptions" do
+      assert_raise ExternalService.FuseBlownError, Atom.to_string(@fuse_name), fn ->
         ExternalService.call!(@fuse_name, @retry_opts, fn -> raise "KABOOM!" end)
       end
     end
 
-    test "raises RetriesExhausted when retries are exhausted with :retry" do
-      assert_raise ExternalService.RetriesExhausted, fn ->
+    test "raises RetriesExhaustedError when retries are exhausted with :retry" do
+      assert_raise ExternalService.RetriesExhaustedError, fn ->
         ExternalService.call!(@fuse_name, @expiring_retry_options, fn -> :retry end)
       end
     end
 
-    test "raises RetriesExhausted when retries are exhausted with a reason" do
-      assert_raise ExternalService.RetriesExhausted, fn ->
+    test "raises RetriesExhaustedError when retries are exhausted with a reason" do
+      assert_raise ExternalService.RetriesExhaustedError, fn ->
         ExternalService.call!(@fuse_name, @expiring_retry_options, fn -> {:retry, "reason"} end)
       end
     end

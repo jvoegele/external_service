@@ -11,6 +11,7 @@ defmodule ExternalService.Mixfile do
       elixir: "~> 1.4",
       start_permanent: Mix.env() == :prod,
       package: package(),
+      docs: docs(),
       deps: deps()
     ]
   end
@@ -41,5 +42,9 @@ defmodule ExternalService.Mixfile do
       licenses: ["Apache 2.0"],
       links: %{"GitHub" => "https://github.com/jvoegele/external_service"}
     ]
+  end
+
+  defp docs do
+    [extras: ["README.md"]]
   end
 end
