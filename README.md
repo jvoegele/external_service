@@ -22,3 +22,4 @@ Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_do
 and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
 be found at [https://hexdocs.pm/external_service](https://hexdocs.pm/external_service).
 
+Sponsored by Ropig http://ropig.com
