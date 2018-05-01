@@ -29,7 +29,8 @@ defmodule ExternalService.Mixfile do
       {:fuse, "~> 2.4"},
       {:retry, "~> 0.8"},
       {:ex_doc, "~> 0.18", only: :dev, runtime: false},
-      {:dialyxir, "~> 0.5", only: [:dev, :test], runtime: false}
+      {:dialyxir, "~> 0.5", only: [:dev, :test], runtime: false},
+      {:credo, "~> 0.9.2", only: [:dev, :test], runtime: false}
     ]
   end
 
