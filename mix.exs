@@ -46,6 +46,9 @@ defmodule ExternalService.Mixfile do
   end
 
   defp docs do
-    [extras: ["README.md"]]
+    [
+      extras: ["README.md"],
+      main: "readme"
+    ]
   end
 end
