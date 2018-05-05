@@ -32,6 +32,16 @@ ExternalService wraps the functionality provided by fuse in a convenient interfa
 
 The only requirement for using a fuse for a particular service is that it must be initialized before using the service. This is done with the ExternalService.start/2 function, which takes the fuse name and options as arguments. The fuse name is an atom which must uniquely identify the external service to which the fuse applies. This function should be called in your application startup code, which is typically the `Application.start` function for your application.
 
+### Rate Limiting
+
+Since version 0.8.0, `ExternalService` allows for rate limiting of calls to a service by specifying the rate limit as an optional argument to `ExternalService.start`. If the `rate_limit` option is passed to `ExternalService.start`, then all calls to the external service will be automatically rate-limited. Once the number of calls to the external service has exceeded the limits for a given time window, then `ExternalService` will delay the call to the service until the time window has expired and calls to the service are allowed again. The delay is accomplished using Elixir's `Process.sleep/1` function, so if you are using `ExternalService.call` then the calling process is put to sleep for the specified time window. If, on the other hand, you are using `ExternalService.call_async` or `ExternalService.call_async_stream`, then it is the background process(es) that are put to sleep, and the calling process is _not_ put to sleep in this case. In any case, the rate-limiting is applied to all calls to a particular service across your application so that you can rest assured that you will not violate the rate limits imposed by the external service that you are calling.
+
+Applying rate limits to an external service is as simple as specifying the limits in `ExternalService.start`, as in the following example, which limits calls to `:some_external_service` a maximum of 10 times per second:
+
+```elixir
+ExternalService.start(:some_external_service, rate_limit: {10, 1000})
+```
+
 ## Usage Examples
 
 Below are some example usages of `ExternalService` that illustrate how to configure fuses and retries, and how to use the various forms of the `call` functions for using an external service reliably. The examples are adapted from the Ropig code base that was the original use case for `ExternalService`, and they show how to use `ExternalService` for interacting with Google's `Pub/Sub` messaging service.

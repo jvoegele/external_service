@@ -34,14 +34,20 @@ defmodule ExternalService do
           | {:fault_injection, rate :: float(), max_melt_attempts :: pos_integer(),
              time_window :: pos_integer()}
 
-  @type rate_limit :: {limit :: pos_integer(), window_ms :: pos_integer()}
+  @typedoc """
+  A tuple specifying rate-limiting behavior.
+
+  The first element of the tuple is the number of calls to allow in a given time window.
+  The second element is the time window in milliseconds.
+  """
+  @type rate_limit :: {limit :: pos_integer(), time_window :: pos_integer()}
 
   @typedoc """
-  Options used for controlling circuit breaker behavior.
+  Options used for controlling circuit breaker and rate-limiting behavior.
 
   See the [fuse docs](https://hexdocs.pm/fuse/) for further information about available fuse options.
   """
-  @type fuse_options :: [
+  @type options :: [
           fuse_strategy: fuse_strategy(),
           fuse_refresh: pos_integer(),
           rate_limit: rate_limit()
@@ -141,16 +147,22 @@ defmodule ExternalService do
 
   @doc """
   Initializes a new fuse for a specific service.
+
+  The `fuse_name` is an atom that uniquely identifies an external service within the scope of
+  an application.
+
+  The `options` argument allows for controlling the circuit breaker behavior and rate-limiting
+  behavior when making calls to the external service. See `t:options/0` for details.
   """
-  @spec start(fuse_name(), fuse_options()) :: :ok
-  def start(fuse_name, fuse_options \\ []) when is_atom(fuse_name) do
+  @spec start(fuse_name(), options()) :: :ok
+  def start(fuse_name, options \\ []) when is_atom(fuse_name) do
     fuse_opts = {
-      Keyword.get(fuse_options, :fuse_strategy, @default_fuse_options.fuse_strategy),
-      {:reset, Keyword.get(fuse_options, :fuse_refresh, @default_fuse_options.fuse_refresh)}
+      Keyword.get(options, :fuse_strategy, @default_fuse_options.fuse_strategy),
+      {:reset, Keyword.get(options, :fuse_refresh, @default_fuse_options.fuse_refresh)}
     }
 
     :ok = Fuse.install(fuse_name, fuse_opts)
-    rate_limit = RateLimit.new(fuse_name, Keyword.get(fuse_options, :rate_limit))
+    rate_limit = RateLimit.new(fuse_name, Keyword.get(options, :rate_limit))
     State.init(fuse_name, fuse_opts, rate_limit)
     :ok
   end
