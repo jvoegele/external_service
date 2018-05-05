@@ -6,7 +6,7 @@ defmodule ExternalService.Mixfile do
       app: :external_service,
       version: "0.8.0",
       description:
-        "Elixir library for safely consuming external services using retry logic and circuit breakers",
+        "Elixir library for safely using external services using retry logic, circuit breakers, and automatic rate limiting",
       source_url: "https://github.com/jvoegele/external_service",
       elixir: "~> 1.4",
       start_permanent: Mix.env() == :prod,

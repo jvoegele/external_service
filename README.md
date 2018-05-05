@@ -1,7 +1,6 @@
 # ExternalService
 
-An Elixir library for safely using external services using customizable retry
-logic and the circuit breaker pattern.
+An Elixir library for safely using external services using customizable retry logic, automatic rate limiting, and the circuit breaker pattern.
 
 ## Overview
 
