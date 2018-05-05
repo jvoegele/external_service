@@ -4,6 +4,7 @@ defmodule ExternalService do
   """
 
   require Logger
+  alias ExternalService.RateLimit
   alias :fuse, as: Fuse
 
   @typedoc "Name of a fuse"
@@ -33,6 +34,8 @@ defmodule ExternalService do
           | {:fault_injection, rate :: float(), max_melt_attempts :: pos_integer(),
              time_window :: pos_integer()}
 
+  @type rate_limit :: {limit :: pos_integer(), window_ms :: pos_integer()}
+
   @typedoc """
   Options used for controlling circuit breaker behavior.
 
@@ -40,7 +43,8 @@ defmodule ExternalService do
   """
   @type fuse_options :: [
           fuse_strategy: fuse_strategy(),
-          fuse_refresh: pos_integer()
+          fuse_refresh: pos_integer(),
+          rate_limit: rate_limit()
         ]
 
   @default_fuse_options %{
@@ -114,17 +118,41 @@ defmodule ExternalService do
     defexception [:message]
   end
 
+  defmodule State do
+    @moduledoc false
+
+    defstruct [:fuse_name, :fuse_options, :rate_limit]
+
+    def init(fuse_name, fuse_options, rate_limit) do
+      state = %__MODULE__{
+        fuse_name: fuse_name,
+        fuse_options: fuse_options,
+        rate_limit: rate_limit
+      }
+
+      Agent.start(fn -> state end, name: registered_name(fuse_name))
+      state
+    end
+
+    def get(fuse_name), do: Agent.get(registered_name(fuse_name), & &1)
+
+    def registered_name(fuse_name), do: Module.concat(fuse_name, __MODULE__)
+  end
+
   @doc """
   Initializes a new fuse for a specific service.
   """
   @spec start(fuse_name(), fuse_options()) :: :ok
-  def start(fuse_name, fuse_options \\ []) do
+  def start(fuse_name, fuse_options \\ []) when is_atom(fuse_name) do
     fuse_opts = {
       Keyword.get(fuse_options, :fuse_strategy, @default_fuse_options.fuse_strategy),
       {:reset, Keyword.get(fuse_options, :fuse_refresh, @default_fuse_options.fuse_refresh)}
     }
 
     :ok = Fuse.install(fuse_name, fuse_opts)
+    rate_limit = RateLimit.new(fuse_name, Keyword.get(fuse_options, :rate_limit))
+    State.init(fuse_name, fuse_opts, rate_limit)
+    :ok
   end
 
   @doc """
@@ -291,7 +319,9 @@ defmodule ExternalService do
   @spec try_function(atom, retriable_function) ::
           {:error, {:retry, any}} | {:error, :retry} | {:no_retry, any} | no_return
   defp try_function(fuse_name, function) do
-    case function.() do
+    rate_limit = State.get(fuse_name).rate_limit
+
+    case RateLimit.call(rate_limit, function) do
       {:retry, reason} ->
         Fuse.melt(fuse_name)
         {:error, {:retry, reason}}
