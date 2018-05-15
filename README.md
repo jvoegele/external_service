@@ -43,9 +43,11 @@ ExternalService.start(:some_external_service, rate_limit: {10, 1000})
 
 ## Usage Examples
 
-Below are some example usages of `ExternalService` that illustrate how to configure fuses and retries, and how to use the various forms of the `call` functions for using an external service reliably. The examples are adapted from the Ropig code base that was the original use case for `ExternalService`, and they show how to use `ExternalService` for interacting with Google's `Pub/Sub` messaging service.
+Below are some example usages of `ExternalService` that illustrate how to configure fuses and retries, and how to use the various forms of the `call` functions for using an external service reliably. Some of the examples are adapted from the Ropig code base that was the original use case for `ExternalService`, and they show how to use `ExternalService` for interacting with Google's `Pub/Sub` messaging service.
 
 ### Fuse initialization
+
+This example shows how to initialize the fuse for a service, as well as how to apply automatic rate limiting to that service.
 
 ```elixir
 defmodule PubSub do
@@ -54,17 +56,20 @@ defmodule PubSub do
     # Tolerate 50 failures for ever 1 second time window.
     fuse_strategy: {:standard, 50, 1_000},
     # Reset the fuse 5 seconds after it is blown.
-    fuse_refresh: 5_000
+    fuse_refresh: 5_000,
+    # Limit to 10 calls per second.
+    rate_limit: {10, 1_000}
   ]
 
   def start do
     ExternalService.start(@fuse_name, @fuse_options)
   end
+end
 ```
 
-### `ExternalService.call` and retry options
+### Triggering a retry
 
-This example illustrates the usage of the `ExternalService.call` function and some of the retry options that can be used to control retry behavior.
+This example illustrates the usage of the `ExternalService.call` function and some of the retry options that can be used to control retry behavior. Notice how we delegate to a named function in `call`.
 
 ```elixir
 defmodule PubSub do
@@ -84,16 +89,19 @@ defmodule PubSub do
   }
 
   def publish(message, topic) do
-    ExternalService.call(PubSub, @retry_opts, fn ->
-      kane_result = Kane.Message.publish(message, %Kane.Topic{name: topic})
-      case kane_result do
-        {:error, reason, code} when code in @retry_errors ->
-          {:retry, reason}
-        _ ->
-          # If not a retriable error, just return the result.
-          kane_result
-      end
-    end)
+    ExternalService.call(PubSub, @retry_opts, fn -> try_publish(message, topic) end)
+  end
+
+  defp try_publish(message, topic) do
+    message
+    |> Kane.Message.publish(%Kane.Topic{name: topic})
+    |> case do
+      {:error, reason, code} when code in @retry_errors ->
+        {:retry, reason}
+      _ ->
+        # If not a retriable error, just return the result.
+        kane_result
+    end
   end
 end
 ```
@@ -108,16 +116,48 @@ In our example code, we examine the result of calling Kane.Message.publish and i
 
 Not all failed requests should be retried, of course. Some failures are due to bugs in the calling code; such calls can never succeed and therefore should not be retried. In our case, we consulted the documentation for Google Pub/Sub to determine which error codes should result in a retry. You will have to decide on a strategy to determine what error conditions are retriable for your service.
 
-### Other forms of `ExternalService.call`
+### Error handling
 
-In addition to the [`call`](https://hexdocs.pm/external_service/ExternalService.html#call/3) function shown above, the `ExternalService` module also provides other forms of call with slightly different behaviors:
+Although the retry mechanism goes a long way towards eliminating transient failures, there will be times when a service is unavailable for a long enough time that retries ultimately fail. If, for example, a request has been retried several times and the time spent on retries exceeds the configured `expiry` time for that request, then `ExternalService.call` will give up and return the tuple `{:error, :retries_exhausted}`.
 
-* [`call!`](https://hexdocs.pm/external_service/ExternalService.html#call!/3) - like `call` but raises an exception (instead of returning an error tuple) if retries are exhausted or the fuse is blown
-* [`call_async`](https://hexdocs.pm/external_service/ExternalService.html#call_async/3) - asynchronous version of `call` that returns an Elixir `Task` that can be used to retrieve the result
-* [`call_async_stream`](https://hexdocs.pm/external_service/ExternalService.html#call_async_stream/5) - parallel, streaming version of `call` that is modeled after Elixir's built-in `Task.async_stream` function
+Another failure scenario is when there are many different processes using an external service concurrently, such as for example many different web requests. If the service or API being used is temporarily unable to handle requests, then all of these concurrent calls to the service will eventually trip the circuit breaker associated with that external service. Then, `ExternalService.call` will return the tuple `{:error, :fuse_blown}`. Further calls to the service at this point would immediately result in the `{:error, :fuse_blown}` until the fuse is reset, which happens automatically after the configured `fuse_refresh` time for the fuse.
 
+It is up to the caller to determine how to handle these errors. A web application might, for example, log the error and return a *503 Service Unavailable* status code. Background jobs could log the error and pause until the service is fully functioning again. This example shows a Phoenix controller that uses the `PubSub.publish` function from above and handles failed requests by returning a *503* status code.
 
-In the code example that follows, some of these various forms of `call` are illustrated using the same `@retry_errors` and `@retry_opts` from the previous example above.
+```elixir
+defmodule MyApp.MyController do
+  use MyAppWeb, :controller
+  require Logger
+
+  @topic "some_topic"
+
+  def create(conn, %{"message" => message}) do
+    case PubSub.publish(message, @topic) do
+      {:ok, _result} ->
+        send_resp(conn, 201, "")
+
+      {:error, {:retries_exhausted, reason}} ->
+        Logger.error("Retries exhausted while trying to publish to #{@topic}: #{inspect(reason)}")
+        send_resp(conn, 503, "")
+
+      {:error, {:fuse_blown, fuse_name}} ->
+        Logger.error("Fuse blown while trying to publish to #{@topic}: #{inspect(fuse_name)}")
+        send_resp(conn, 503, "")
+
+      error ->
+        # If we got here it means that we did not an :ok response from Kane, nor did we get one of
+        # the error tuples meaning retries_exhausted or fuse_blown, so it must be some other kind
+        # of non-retriable error response from Kane itself. Log the error and send back a 503.
+        Logger.error("Unknown error while trying to publish to #{@topic}: #{inspect(error)}")
+        send_resp(conn, 503, "")
+    end
+  end
+end
+```
+
+### Cleaning up error handling with `ExternalService.call!`
+
+As seen in the above example, error handling code can be somewhat intricate because we must distinguish between error responses that are created by `ExternalService.call` versus responses that originate from the service itself. In cases like this it can be useful to use `ExternalService.call!` so that error responses created by `ExternalService` are raised as exceptions instead of returned as error tuples. To show how this works, let's add a new `publish!` function to the `PubSub` module, which is just like `publish` except that it uses `call!` instead of `call`.
 
 ```elixir
 defmodule PubSub do
@@ -125,32 +165,83 @@ defmodule PubSub do
 
   # Will raise a `RetriesExhaustedError` or `FuseBlownError` in event of failure.
   def publish!(message, topic) do
-    ExternalService.call!(PubSub, @retry_opts, fn ->
-      kane_result = Kane.Message.publish(message, %Kane.Topic{name: topic})
-      case kane_result do
-        {:error, reason, code} when code in @retry_errors ->
-          {:retry, reason}
-        _ ->
-          # If not a retriable error, just return the result.
-          kane_result
-      end
-    end)
+    ExternalService.call!(PubSub, @retry_opts, fn -> try_publish(message, topic) end)
   end
+end
+```
+
+Now let's see how this impacts our calling code in the hypothetical controller:
+
+```elixir
+defmodule MyApp.MyController do
+  use MyAppWeb, :controller
+  require Logger
+
+  @topic "some_topic"
+
+  def create(conn, %{"message" => message}) do
+    try do
+      case PubSub.publish(message, @topic) do
+        {:ok, _result} ->
+          send_resp(conn, 201, "")
+
+        error ->
+          Logger.error("Unknown error while trying to publish to #{@topic}: #{inspect(error)}")
+          send_resp(conn, 503, "")
+      end
+    rescue
+      e in [ExternalService.RetriesExhaustedError, ExternalService.FuseBlownError] ->
+        Logger.error(Exception.format(:error, e))
+        send_resp(conn, 503, "")
+    end
+  end
+end
+```
+
+By using `call!`, it is much more apparent which kinds of errors are coming from the actual service being used, rather than those that are created by `ExternalService`.
+
+### Asynchronous calls
+
+In addition to the [`call`](https://hexdocs.pm/external_service/ExternalService.html#call/3) function demonstrated above, the `ExternalService` module also provides `call_async` and `call_async_stream`:
+
+* [`call_async`](https://hexdocs.pm/external_service/ExternalService.html#call_async/3) - asynchronous version of `call` that returns an Elixir `Task` that can be used to retrieve the result
+* [`call_async_stream`](https://hexdocs.pm/external_service/ExternalService.html#call_async_stream/5) - parallel, streaming version of `call` that is modeled after Elixir's built-in `Task.async_stream` function
+
+Both of these asynchronous functions apply the same retry and circuit breaker mechanisms as the synchronous `call` function, so any necessary retries are performed transparently in the background task(s).
+
+In the code examples that follow, these asynchronous forms of `call` are illustrated using the same `@retry_errors`, `@retry_opts`, and `try_publish/2` function from the previous example above.
+
+```elixir
+defmodule PubSub do
+  # same @retry_errors and @retry_opts from above example...
 
   # Returns an Elixir `Task`, which can be used to retrieve the result,
   # using `Task.await`, for example.
   def publish_async(message, topic) do
-    ExternalService.call_async(PubSub, @retry_opts, fn ->
-      kane_result = Kane.Message.publish(message, %Kane.Topic{name: topic})
-      case kane_result do
-        {:error, reason, code} when code in @retry_errors ->
-          {:retry, reason}
-        _ ->
-          # If not a retriable error, just return the result.
-          kane_result
-      end
+    ExternalService.call_async(PubSub, @retry_opts, fn -> try_publish(message, topic) end)
+  end
+
+  # Publish many messages in parallel and return a Stream of results as described by `Task.async_stream`.
+  def publish_async_stream(messages, topic) when is_list(messages) do
+    ExternalService.call_async_stream(messages, PubSub, @retry_opts, fn message ->
+      try_publish(message, topic)
     end)
   end
+end
+```
+
+Using the async version is a simple means of achieving paralellism since other work can be accomplished while the external calls are taking place. For example:
+
+```elixir
+task = PubSub.publish_async("Hello", "world")
+do_other_things()
+case Task.await(task) do
+  {:ok, _result} ->
+    :ok
+  {:error, {:retries_exhausted, reason}} ->
+    :error
+  {:error, {:fuse_blown, fuse_name}} ->
+    :error
 end
 ```
 
@@ -160,7 +251,7 @@ See [my blog post](https://ropig.com/blog/use-external-services-safely-reliably-
 
 ## Installation
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
+`external_service` is [available in Hex](https://hex.pm/packages/external_service), and can be installed
 by adding `external_service` to your list of dependencies in `mix.exs`:
 
 ```elixir
