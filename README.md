@@ -256,7 +256,7 @@ by adding `external_service` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
-  [{:external_service, "~> 0.8.0"}]
+  [{:external_service, "~> 0.8.1"}]
 end
 ```
 
