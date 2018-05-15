@@ -12,8 +12,12 @@ defmodule ExternalService.RateLimit do
 
   defstruct [:fuse, :limit, :time_window, :sleep]
 
-  defguard is_rate_limit(limit, time_window)
-           when is_integer(limit) and limit > 0 and is_integer(time_window) and time_window > 0
+  defmacro is_rate_limit(limit, time_window) do
+    quote do
+      is_integer(unquote(limit)) and unquote(limit) > 0 and is_integer(unquote(time_window)) and
+        unquote(time_window) > 0
+    end
+  end
 
   def new(_fuse_name, nil), do: %__MODULE__{}
 
