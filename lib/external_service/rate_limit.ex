@@ -49,8 +49,8 @@ defmodule ExternalService.RateLimit do
       when is_rate_limit(limit, window) and is_function(function) do
     case Fuse.ask(rate_limit.fuse, :sync) do
       :ok ->
-        function.()
         Fuse.melt(rate_limit.fuse)
+        function.()
 
       :blown ->
         rate_limit.sleep.(window)
