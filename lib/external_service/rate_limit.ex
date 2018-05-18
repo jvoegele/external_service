@@ -1,6 +1,8 @@
 defmodule ExternalService.RateLimit do
   @moduledoc false
 
+  require Logger
+
   @opaque t :: %__MODULE__{
             bucket: String.t(),
             limit: pos_integer,
@@ -31,7 +33,17 @@ defmodule ExternalService.RateLimit do
       bucket: bucket,
       limit: limit,
       time_window: window,
-      sleep: &Process.sleep/1
+      sleep: fn sleep_time ->
+        bucket_info = ExRated.inspect_bucket(bucket, window, limit)
+
+        Logger.info([
+          "Rate limit exceeded for service #{fuse_name}, sleeping for #{sleep_time} milliseconds.\n",
+          "ExRated bucket info:",
+          inspect(bucket_info)
+        ])
+
+        Process.sleep(sleep_time)
+      end
     }
 
     rate_limit
