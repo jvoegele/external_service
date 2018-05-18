@@ -47,8 +47,8 @@ defmodule ExternalService.RateLimitTest do
       results = Enum.map(1..5, fn x -> RateLimit.call(rate_limit, fn -> x end) end)
       assert results == [1, 2, 3, 4, 5]
 
-      # Sleeps are somewhat non-deterministic, but we should get either 3 or 4 of them in this case
-      assert get_sleep_calls() in [[25, 25, 25], [25, 25, 25, 25]]
+      # Sleeps are somewhat non-deterministic, but we should get 2, 3, or 4 of them in this case.
+      assert get_sleep_calls() in Enum.map([2, 3, 4], &List.duplicate(25, &1))
     end
 
     defp init_sleep_spy(_context) do

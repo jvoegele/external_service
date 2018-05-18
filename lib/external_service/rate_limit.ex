@@ -33,17 +33,7 @@ defmodule ExternalService.RateLimit do
       bucket: bucket,
       limit: limit,
       time_window: window,
-      sleep: fn sleep_time ->
-        bucket_info = ExRated.inspect_bucket(bucket, window, limit)
-
-        Logger.info([
-          "Rate limit exceeded for service #{fuse_name}, sleeping for #{sleep_time} milliseconds.\n",
-          "ExRated bucket info:",
-          inspect(bucket_info)
-        ])
-
-        Process.sleep(sleep_time)
-      end
+      sleep: make_sleep_fun(fuse_name, bucket, limit, window)
     }
 
     rate_limit
@@ -74,4 +64,29 @@ defmodule ExternalService.RateLimit do
 
   defp sleep_time(%__MODULE__{limit: limit, time_window: window}),
     do: trunc(Float.ceil(window / limit))
+
+  defp make_sleep_fun(fuse_name, bucket, limit, window) do
+    fn sleep_time ->
+      Logger.info(fn ->
+        [
+          "[ExternalService] ",
+          "Rate limit exceeded for service ",
+          inspect(fuse_name),
+          "; sleeping for ",
+          inspect(sleep_time),
+          " milliseconds."
+        ]
+      end)
+
+      Logger.debug(fn ->
+        [
+          "[ExternalService] ExRated bucket info: ",
+          inspect(ExRated.inspect_bucket(bucket, window, limit))
+        ]
+      end)
+
+      Process.sleep(sleep_time)
+    end
+
+  end
 end
