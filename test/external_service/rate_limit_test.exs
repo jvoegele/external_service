@@ -33,7 +33,8 @@ defmodule ExternalService.RateLimitTest do
 
     test "with no rate limit", %{sleep_spy: spy} do
       rate_limit = RateLimit.new(:unlimited, nil)
-      RateLimit.call(%{rate_limit | sleep: spy}, fn -> :ok end)
+      result = RateLimit.call(%{rate_limit | sleep: spy}, fn -> 42 end)
+      assert result == 42
       assert get_sleep_calls() == []
     end
 
@@ -43,8 +44,11 @@ defmodule ExternalService.RateLimitTest do
         |> RateLimit.new({2, 50})
         |> Map.put(:sleep, spy)
 
-      Enum.each(1..5, fn _ -> RateLimit.call(rate_limit, fn -> :noop end) end)
-      assert get_sleep_calls() == [50, 50]
+      results = Enum.map(1..5, fn x -> RateLimit.call(rate_limit, fn -> x end) end)
+      assert results == [1, 2, 3, 4, 5]
+
+      # Sleeps are somewhat non-deterministic, but we should get either 3 or 4 of them in this case
+      assert get_sleep_calls() in [[25, 25, 25], [25, 25, 25, 25]]
     end
 
     defp init_sleep_spy(_context) do
