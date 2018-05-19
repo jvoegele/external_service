@@ -110,7 +110,7 @@ We wrap our call to the external service in a function and pass this function to
 
 1. the function returns `:retry`
 1. the function returns a tuple of the form `{:retry, reason}`
-1. the function raises an Elixir `RuntimeError`
+1. the function raises an Elixir `RuntimeError`, or another exception type specified in the `rescue_only` option
 
 In our example code, we examine the result of calling Kane.Message.publish and if it is an error response with an error code that matches one of our predetermined `@retry_errors`, we then trigger a retry.
 

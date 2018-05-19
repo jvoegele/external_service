@@ -73,13 +73,37 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == 2
     end
 
-    test "calls function again when it raises an exception" do
+    test "calls function again when it raises a RuntimeError" do
       ExternalService.call(@fuse_name, @retry_opts, fn ->
         Process.put(@fuse_name, Process.get(@fuse_name) + 1)
         raise "KABOOM!"
       end)
 
       assert Process.get(@fuse_name) == @fuse_retries + 1
+    end
+
+    test "calls function again when it raises an exception in the rescue_only list" do
+      retry_opts = %{@retry_opts | rescue_only: [ArithmeticError, ArgumentError]}
+
+      ExternalService.call(@fuse_name, retry_opts, fn ->
+        Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+        raise ArgumentError, message: "KABOOM!"
+      end)
+
+      assert Process.get(@fuse_name) == @fuse_retries + 1
+    end
+
+    test "does not call function again when it raises an exception not in the rescue_only list" do
+      retry_opts = %{@retry_opts | rescue_only: [SystemLimitError, File.Error]}
+
+      assert_raise(RuntimeError, fn ->
+        ExternalService.call(@fuse_name, retry_opts, fn ->
+          Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+          raise "KABOOM!"
+        end)
+      end)
+
+      assert Process.get(@fuse_name) == 1
     end
 
     test "returns fuse_blown when the fuse is blown by retries" do

@@ -86,18 +86,22 @@ defmodule ExternalService do
     - `expiry`: limit total length of time to allow for retries to the specified time budget
         milliseconds
     - `cap`: limit maximum amount of time between retries to the specified number of milliseconds
+    - `rescue_only`: retry only on exceptions matching one of the list of provided exception types,
+        (defaults to `[RuntimeError]`)
     """
     @type t :: %__MODULE__{
             backoff: backoff(),
             randomize: boolean(),
             expiry: pos_integer() | nil,
-            cap: pos_integer() | nil
+            cap: pos_integer() | nil,
+            rescue_only: list(module())
           }
 
     defstruct backoff: {:exponential, 10},
               randomize: false,
               expiry: nil,
-              cap: nil
+              cap: nil,
+              rescue_only: [RuntimeError]
   end
 
   defmodule RetriesExhaustedError do
@@ -292,7 +296,7 @@ defmodule ExternalService do
   defp do_retry(fuse_name, retry_opts, function) do
     require Retry
 
-    Retry.retry with: apply_retry_options(retry_opts) do
+    Retry.retry with: apply_retry_options(retry_opts), rescue_only: retry_opts.rescue_only do
       case Fuse.ask(fuse_name, :sync) do
         :ok -> try_function(fuse_name, function)
         :blown -> throw(:blown)
