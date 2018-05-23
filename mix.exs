@@ -19,7 +19,8 @@ defmodule ExternalService.Mixfile do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger],
+      mod: {ExternalService.Application, []}
     ]
   end
 
@@ -27,8 +28,7 @@ defmodule ExternalService.Mixfile do
   defp deps do
     [
       {:fuse, "~> 2.4"},
-      # {:retry, "~> 0.8"},
-      {:retry, github: "jvoegele/ElixirRetry", branch: "feature/rescue_only_runtime_list"},
+      {:retry, "~> 0.8"},
       {:ex_rated, "~> 1.3"},
       {:ex_doc, "~> 0.18", only: :dev, runtime: false},
       {:dialyxir, "~> 0.5", only: [:dev, :test], runtime: false},
