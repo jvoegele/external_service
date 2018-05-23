@@ -20,7 +20,7 @@ defmodule ExternalService.Mixfile do
   def application do
     [
       extra_applications: [:logger],
-      mod: {ExternalService.Application, []}
+      # mod: {ExternalService.Application, []}
     ]
   end
 
