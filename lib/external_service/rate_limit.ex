@@ -4,13 +4,14 @@ defmodule ExternalService.RateLimit do
   require Logger
 
   @opaque t :: %__MODULE__{
+            fuse: ExternalService.fuse_name(),
             bucket: String.t(),
             limit: pos_integer,
             time_window: pos_integer,
             sleep: function
           }
 
-  defstruct [:bucket, :limit, :time_window, :sleep]
+  defstruct [:fuse, :bucket, :limit, :time_window, :sleep]
 
   defmacro is_rate_limit(limit, time_window) do
     quote do
@@ -30,10 +31,11 @@ defmodule ExternalService.RateLimit do
     bucket = bucket_name(fuse_name)
 
     rate_limit = %__MODULE__{
+      fuse: fuse_name,
       bucket: bucket,
       limit: limit,
       time_window: window,
-      sleep: make_sleep_fun(fuse_name, bucket, limit, window)
+      sleep: &Process.sleep/1
     }
 
     rate_limit
@@ -43,20 +45,28 @@ defmodule ExternalService.RateLimit do
     raise(ArgumentError, message: "Invalid rate limit arguments")
   end
 
-  @spec call(t, (() -> any)) :: any
-  def call(%__MODULE__{limit: limit, time_window: window} = rate_limit, function)
+  @spec call(t, (() -> any), non_neg_integer) :: any
+  def call(rate_limit, function, sleep_count \\ 0)
+
+  def call(
+        %__MODULE__{bucket: bucket, limit: limit, time_window: window} = rate_limit,
+        function,
+        sleep_count
+      )
       when is_rate_limit(limit, window) and is_function(function) do
-    case ExRated.check_rate(rate_limit.bucket, window, limit) do
+    case ExRated.check_rate(bucket, window, limit) do
       {:ok, _} ->
         function.()
 
       {:error, _} ->
-        rate_limit.sleep.(sleep_time(rate_limit))
-        call(rate_limit, function)
+        sleep_time = sleep_time(rate_limit)
+        log_sleep(rate_limit.fuse, bucket, limit, window, sleep_time, sleep_count)
+        rate_limit.sleep.(sleep_time)
+        call(rate_limit, function, sleep_count + 1)
     end
   end
 
-  def call(%__MODULE__{}, function) when is_function(function), do: function.()
+  def call(%__MODULE__{}, function, _sleep_count) when is_function(function), do: function.()
 
   @spec bucket_name(atom) :: String.t()
   def bucket_name(root_fuse_name) when is_atom(root_fuse_name),
@@ -65,12 +75,11 @@ defmodule ExternalService.RateLimit do
   defp sleep_time(%__MODULE__{limit: limit, time_window: window}),
     do: trunc(Float.ceil(window / limit))
 
-  defp make_sleep_fun(fuse_name, bucket, limit, window) do
-    fn sleep_time ->
+  defp log_sleep(fuse_name, bucket, limit, window, sleep_time, sleep_count) do
+    if sleep_count == 0 do
       Logger.info(fn ->
         [
-          "[ExternalService] ",
-          "Rate limit exceeded for service ",
+          "[ExternalService] Rate limit exceeded for service ",
           inspect(fuse_name),
           "; sleeping for ",
           inspect(sleep_time),
@@ -84,9 +93,6 @@ defmodule ExternalService.RateLimit do
           inspect(ExRated.inspect_bucket(bucket, window, limit))
         ]
       end)
-
-      Process.sleep(sleep_time)
     end
-
   end
 end
