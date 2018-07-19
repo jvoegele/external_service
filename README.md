@@ -22,14 +22,14 @@ The Circuit Breaker pattern is modeled after electrical circuit breakers, which 
 
 In contrast to retry logic, which is applied to each individual call to a service, the circuit breaker for a given service is global to the entire system. If a circuit trips, then it trips for all users of the associated service. This is a key feature of the Circuit Breaker pattern, and is what allows it to prevent cascading failures.
 
-The `external_service` package uses the [Erlang fuse library](https://github.com/jlouis/fuse) from Jesper Louis Andersen for implementing circuit breakers. To extend the electrical analogies, circuit breakers in the fuse library are called “fuses.” These fuses can be used to protect against cascading failure by first asking the fuse if it is OK to proceed using the `:fuse.ask` function. If this function returns `:ok` then it is OK to proceed to calling on the external service. If, on the other hand, it returns `:blown,` then the fuse has been tripped and it is not safe to call the external service. In this scenario, your code must have a fallback option to compensate for the fact that the external service is unavailable, which might mean returning cached data or indicating to the user that the functionality is not currently available.
+The `external_service` package uses the [Erlang fuse library](https://github.com/jlouis/fuse) from Jesper Louis Andersen for implementing circuit breakers. To extend the electrical analogies, circuit breakers in the fuse library are called “fuses.” These fuses can be used to protect against cascading failure by first asking the fuse if it is OK to proceed using the `:fuse.ask` function. If this function returns `:ok` then it is OK to proceed to calling on the external service. If, on the other hand, it returns `:blown`, then the fuse has been tripped and it is not safe to call the external service. In this scenario, your code must have a fallback option to compensate for the fact that the external service is unavailable, which might mean returning cached data or indicating to the user that the functionality is not currently available.
 
 What causes a fuse to trip?
 When using a fuse, your application code must tell the fuse about any failures that occur. If you’ve asked the fuse if it is OK to proceed but then receive an error from the external service, your code should call the `:fuse.melt` function, which “melts the fuse a little bit”. Once the fuse has been “melted” enough times, the fuse is tripped and future calls to `:fuse.ask` for that fuse will return `:blown`.
 
 ExternalService wraps the functionality provided by fuse in a convenient interface and automates the handling of the fuse so that you don’t need to explicitly call `:fuse.ask` or `:fuse.melt` in your code. Instead, you simply use the ExternalService.call function with the name of the fuse as the first argument, together with the function in which you’ve wrapped your call to the external API. Then, the ExternalService.call function will first ask the given fuse before making the call and will return `{:error, :fuse_blown}` if the fuse is blown. It will also automatically call `:fuse.melt` any time the call to the given function results in a retry. This eventually results in a blown fuse if there are enough failed requests to the service being protected by the fuse.
 
-The only requirement for using a fuse for a particular service is that it must be initialized before using the service. This is done with the ExternalService.start/2 function, which takes the fuse name and options as arguments. The fuse name is an atom which must uniquely identify the external service to which the fuse applies. This function should be called in your application startup code, which is typically the `Application.start` function for your application.
+The only requirement for using a fuse for a particular service is that it must be initialized before using the service. This is done with the `ExternalService.start/2` function, which takes the fuse name and options as arguments. The fuse name is an atom which must uniquely identify the external service to which the fuse applies. This function should be called in your application startup code, which is typically the `Application.start` function for your application.
 
 ### Rate Limiting
 
@@ -53,12 +53,12 @@ This example shows how to initialize the fuse for a service, as well as how to a
 defmodule PubSub do
   @fuse_name __MODULE__
   @fuse_options [
-    # Tolerate 50 failures for ever 1 second time window.
-    fuse_strategy: {:standard, 50, 1_000},
+    # Tolerate 5 failures for every 1 second time window.
+    fuse_strategy: {:standard, 5, 1_000},
     # Reset the fuse 5 seconds after it is blown.
     fuse_refresh: 5_000,
-    # Limit to 10 calls per second.
-    rate_limit: {10, 1_000}
+    # Limit to 100 calls per second.
+    rate_limit: {100, 1_000}
   ]
 
   def start do
@@ -98,7 +98,7 @@ defmodule PubSub do
     |> case do
       {:error, reason, code} when code in @retry_errors ->
         {:retry, reason}
-      _ ->
+      kane_result ->
         # If not a retriable error, just return the result.
         kane_result
     end
@@ -181,7 +181,7 @@ defmodule MyApp.MyController do
 
   def create(conn, %{"message" => message}) do
     try do
-      case PubSub.publish(message, @topic) do
+      case PubSub.publish!(message, @topic) do
         {:ok, _result} ->
           send_resp(conn, 201, "")
 
