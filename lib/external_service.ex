@@ -302,6 +302,12 @@ defmodule ExternalService do
         :blown -> throw(:blown)
         {:error, :not_found} -> throw(:not_found)
       end
+    after
+      {:no_retry, _} = result -> result
+    else
+      {:error, :retry} = error -> error
+      {:error, {:retry, _reason}} = error -> error
+      error -> raise(error)
     end
   catch
     :blown ->

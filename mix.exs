@@ -28,7 +28,7 @@ defmodule ExternalService.Mixfile do
   defp deps do
     [
       {:fuse, "~> 2.4"},
-      {:retry, "< 0.10.0"},
+      {:retry, "~> 0.11.2"},
       {:ex_rated, "~> 1.3"},
       {:ex_doc, "~> 0.18", only: :dev, runtime: false},
       {:dialyxir, "~> 0.5", only: [:dev, :test], runtime: false},
@@ -41,7 +41,7 @@ defmodule ExternalService.Mixfile do
     [
       name: :external_service,
       files: ["lib", "mix.exs", "README*", "LICENSE*"],
-      maintainers: ["Jason Voegele", "Chad Jablonski"],
+      maintainers: ["Jason Voegele"],
       licenses: ["Apache 2.0"],
       links: %{"GitHub" => "https://github.com/jvoegele/external_service"}
     ]
