@@ -323,8 +323,8 @@ defmodule ExternalService do
 
     delay_stream =
       case retry_opts.backoff do
-        {:exponential, initial_delay} -> exp_backoff(initial_delay)
-        {:linear, initial_delay, factor} -> lin_backoff(initial_delay, factor)
+        {:exponential, initial_delay} -> exponential_backoff(initial_delay)
+        {:linear, initial_delay, factor} -> linear_backoff(initial_delay, factor)
       end
 
     retry_opts
