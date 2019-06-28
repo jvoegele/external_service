@@ -22,7 +22,7 @@ defmodule ExternalService do
   @typedoc "Union type representing all the possible error tuple return values"
   @type error :: retries_exhausted | fuse_blown | fuse_not_found
 
-  @type retriable_function_result :: :retry | {:retry, reason :: any()} | function_result :: any()
+  @type retriable_function_result :: :retry | ({:retry, reason :: any()}) | (function_result :: any())
 
   @type retriable_function :: (() -> retriable_function_result())
 
@@ -183,7 +183,7 @@ defmodule ExternalService do
   retried and the result of the function will be returned as the result of `call`.
   """
   @spec call(fuse_name(), RetryOptions.t(), retriable_function()) ::
-          error | function_result :: any
+          error | (function_result :: any)
   def call(fuse_name, retry_opts \\ %RetryOptions{}, function) do
     case do_retry(fuse_name, retry_opts, function) do
       {:no_retry, result} -> result
@@ -246,7 +246,7 @@ defmodule ExternalService do
   @spec call_async_stream(
           Enumerable.t(),
           fuse_name(),
-          RetryOptions.t() | async_opts :: list(),
+          RetryOptions.t() | (async_opts :: list()),
           (any() -> retriable_function_result())
         ) :: Enumerable.t()
   def call_async_stream(enumerable, fuse_name, retry_opts = %RetryOptions{}, function)
@@ -287,12 +287,12 @@ defmodule ExternalService do
   end
 
   @spec do_retry(fuse_name(), RetryOptions.t(), retriable_function()) ::
-          {:no_retry, function_result :: any()}
+          {:no_retry, (function_result :: any())}
           | {:error, :retry}
-          | {:error, {:retry, reason :: any()}}
+          | {:error, {:retry, (reason :: any())}}
           | fuse_blown
           | fuse_not_found
-          | function_result :: any()
+          | (function_result :: any())
   defp do_retry(fuse_name, retry_opts, function) do
     require Retry
 
