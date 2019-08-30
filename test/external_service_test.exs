@@ -3,6 +3,8 @@ defmodule ExternalServiceTest do
   alias ExternalService
   alias ExternalService.RetryOptions
 
+  @moduletag capture_log: true
+
   @fuse_name :"test-fuse"
 
   @retry_opts %RetryOptions{

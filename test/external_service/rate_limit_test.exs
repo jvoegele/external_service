@@ -2,6 +2,8 @@ defmodule ExternalService.RateLimitTest do
   use ExUnit.Case
   alias ExternalService.RateLimit
 
+  @moduletag capture_log: true
+
   describe "new/2" do
     test "calling with nil makes an empty RateLimit struct" do
       assert RateLimit.new(:foo, nil) == %RateLimit{}
