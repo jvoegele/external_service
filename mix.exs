@@ -28,11 +28,11 @@ defmodule ExternalService.Mixfile do
   defp deps do
     [
       {:fuse, "~> 2.4"},
-      {:retry, "~> 0.11.2"},
+      {:retry, "~> 0.14.0"},
       {:ex_rated, "~> 1.3"},
-      {:ex_doc, "~> 0.19.2", only: :dev, runtime: false},
-      {:dialyxir, "~> 0.5.1", only: [:dev, :test], runtime: false},
-      {:credo, "~> 1.0", only: [:dev, :test], runtime: false}
+      {:ex_doc, "~> 0.22.1", only: :dev, runtime: false},
+      {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 
