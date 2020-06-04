@@ -15,8 +15,8 @@ defmodule ExternalService.RetryOptions do
   the factor that the initial delay will be multiplied by on each successive retry.
   """
   @type backoff ::
-  {:exponential, initial_delay :: pos_integer()}
-  | {:linear, initial_delay :: pos_integer(), factor :: pos_integer()}
+          {:exponential, initial_delay :: pos_integer()}
+          | {:linear, initial_delay :: pos_integer(), factor :: pos_integer()}
 
   @typedoc """
   Struct representing the retry options to apply to calls to external services.
@@ -30,21 +30,20 @@ defmodule ExternalService.RetryOptions do
         (defaults to `[RuntimeError]`)
   """
   @type t :: %__MODULE__{
-    backoff: backoff(),
-    randomize: boolean(),
-    expiry: pos_integer() | nil,
-    cap: pos_integer() | nil,
-    rescue_only: list(module())
-  }
+          backoff: backoff(),
+          randomize: boolean(),
+          expiry: pos_integer() | nil,
+          cap: pos_integer() | nil,
+          rescue_only: list(module())
+        }
 
   defstruct backoff: {:exponential, 10},
-  randomize: false,
-  expiry: nil,
-  cap: nil,
-  rescue_only: [RuntimeError]
+            randomize: false,
+            expiry: nil,
+            cap: nil,
+            rescue_only: [RuntimeError]
 
   def new(opts) do
     struct(__MODULE__, opts)
   end
 end
-
