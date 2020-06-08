@@ -41,6 +41,31 @@ defmodule ExternalService.Gateway do
           end
         end
       end
+
+  ## Initialization and configuration
+
+  Gateways must be started (preferably under a supervisor) before being used.
+
+  To initialize a gateway with its default configuration, just add the gateway module to the
+  top-level supervisor for your application:
+
+      children = [
+        MyApp.SomeService
+      ]
+
+      Supervisor.start_link(children, strategy: :one_for_one)
+
+  It is also possible to override the default configuration for the gateway by passing options to
+  the child specification that is passed to the supervisor. This can be useful for using different
+  configuration in the test environment. For example:
+
+      some_service_config = Application.get_env(:my_app, :some_service, [])
+
+      children = [
+        {MyApp.SomeService, some_service_config}
+      ]
+
+      Supervisor.start_link(children, strategy: :one_for_one)
   """
 
   alias ExternalService.RetryOptions
