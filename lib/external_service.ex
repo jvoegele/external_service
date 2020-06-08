@@ -128,6 +128,14 @@ defmodule ExternalService do
   end
 
   @doc """
+  Resets the given fuse.
+
+  After reset, the fuse will be unbroken with no melts.
+  """
+  @spec reset_fuse(fuse_name()) :: :ok, {:error, :not_found}
+  def reset_fuse(fuse_name), do: Fuse.reset(fuse_name)
+
+  @doc """
   Given a fuse name and retry options execute a function handling any retry and circuit breaker
   logic.
 

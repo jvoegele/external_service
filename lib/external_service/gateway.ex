@@ -155,6 +155,16 @@ defmodule ExternalService.Gateway do
       end
 
       @doc """
+      Resets the fuse for the gateway.
+
+      After reset, the fuse will be unbroken with no melts.
+      """
+      def reset_fuse do
+        config = get_config()
+        ExternalService.reset_fuse(fuse_name(config))
+      end
+
+      @doc """
       Returns the configuration with which the gateway was started.
       """
       def gateway_config, do: ExternalService.Gateway.get_config(__MODULE__)
