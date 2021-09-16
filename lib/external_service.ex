@@ -128,6 +128,16 @@ defmodule ExternalService do
   end
 
   @doc """
+  Stops the fuse for a specific service.
+  """
+  @spec stop(fuse_name()) :: :ok
+  def stop(fuse_name) when is_atom(fuse_name) do
+    :ok = Fuse.remove(fuse_name)
+    :ok = State.registered_name(fuse_name) |> Agent.stop()
+    :ok
+  end
+
+  @doc """
   Resets the given fuse.
 
   After reset, the fuse will be unbroken with no melts.

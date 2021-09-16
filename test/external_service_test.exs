@@ -36,6 +36,13 @@ defmodule ExternalServiceTest do
     end
   end
 
+  describe "stop" do
+    test "removes a fuse" do
+      ExternalService.stop(@fuse_name)
+      assert :fuse.ask(@fuse_name, :sync) == {:error, :not_found}
+    end
+  end
+
   describe "call" do
     @fuse_retries 5
 
