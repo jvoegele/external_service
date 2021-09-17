@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.1.1] - 2021-09-17
+### Changed
+- Update to fuse 2.5
+- Update ex_rated to 2.0
+
+## [1.1.0] - 2021-09-17
+### Added
+- Add `ExternalService.stop/1` ([PR #9 from @doorgan](https://github.com/jvoegele/external_service/pull/9))
+
+### Changed
+- Allow any term as fuse name ([PR #10 from @doorgan](https://github.com/jvoegele/external_service/pull/10))
+
+
 ## [1.0.1] - 2020-06-08
 ### Added
 - Add ability to reset fuses
@@ -18,5 +31,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Add this changelog...better late than never!
 
 [Unreleased]: https://github.com/jvoegele/external_service/compare/1.0.1...HEAD
+[1.1.1]: https://github.com/jvoegele/external_service/compare/1.1.0...1.1.1
+[1.1.0]: https://github.com/jvoegele/external_service/compare/1.0.1...1.1.0
 [1.0.1]: https://github.com/jvoegele/external_service/compare/1.0.0...1.0.1
 [1.0.0]: https://github.com/jvoegele/external_service/compare/0.9.3...1.0.0
