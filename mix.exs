@@ -27,7 +27,7 @@ defmodule ExternalService.Mixfile do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:fuse, "~> 2.4.3"},
+      {:fuse, "~> 2.5"},
       {:retry, "~> 0.14.0"},
       {:ex_rated, "~> 1.3"},
       {:deep_merge, "~> 1.0"},
