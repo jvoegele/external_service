@@ -29,7 +29,7 @@ defmodule ExternalService.Mixfile do
     [
       {:fuse, "~> 2.5"},
       {:retry, "~> 0.14.0"},
-      {:ex_rated, "~> 1.3"},
+      {:ex_rated, "~> 2.0"},
       {:deep_merge, "~> 1.0"},
       {:ex_doc, "~> 0.22.1", only: :dev, runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
