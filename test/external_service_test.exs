@@ -226,13 +226,13 @@ defmodule ExternalServiceTest do
     end
 
     test "raises FuseBlownError when the fuse is blown by retries" do
-      assert_raise ExternalService.FuseBlownError, Atom.to_string(@fuse_name), fn ->
+      assert_raise ExternalService.FuseBlownError, inspect(@fuse_name), fn ->
         ExternalService.call!(@fuse_name, @retry_opts, fn -> :retry end)
       end
     end
 
     test "raises FuseBlownError when the fuse is blown by exceptions" do
-      assert_raise ExternalService.FuseBlownError, Atom.to_string(@fuse_name), fn ->
+      assert_raise ExternalService.FuseBlownError, inspect(@fuse_name), fn ->
         ExternalService.call!(@fuse_name, @retry_opts, fn -> raise "KABOOM!" end)
       end
     end

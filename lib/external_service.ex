@@ -10,7 +10,7 @@ defmodule ExternalService do
   require Logger
 
   @typedoc "Name of a fuse"
-  @type fuse_name :: atom()
+  @type fuse_name :: term()
 
   @typedoc "Error tuple returned when the allowable number of retries has been exceeded"
   @type retries_exhausted :: {:error, {:retries_exhausted, reason :: any}}
@@ -108,14 +108,14 @@ defmodule ExternalService do
   @doc """
   Initializes a new fuse for a specific service.
 
-  The `fuse_name` is an atom that uniquely identifies an external service within the scope of
+  The `fuse_name` is a term that uniquely identifies an external service within the scope of
   an application.
 
   The `options` argument allows for controlling the circuit breaker behavior and rate-limiting
   behavior when making calls to the external service. See `t:options/0` for details.
   """
   @spec start(fuse_name(), options()) :: :ok
-  def start(fuse_name, options \\ []) when is_atom(fuse_name) do
+  def start(fuse_name, options \\ []) do
     fuse_opts = {
       Keyword.get(options, :fuse_strategy, @default_fuse_options.fuse_strategy),
       {:reset, Keyword.get(options, :fuse_refresh, @default_fuse_options.fuse_refresh)}
@@ -185,7 +185,7 @@ defmodule ExternalService do
           message: "reason: #{inspect(reason)}, fuse_name: #{fuse_name}"
 
       {:error, {:fuse_blown, fuse_name}} ->
-        raise ExternalService.FuseBlownError, message: Atom.to_string(fuse_name)
+        raise ExternalService.FuseBlownError, message: inspect(fuse_name)
 
       {:error, {:fuse_not_found, fuse_name}} ->
         raise ExternalService.FuseNotFoundError, message: fuse_not_found_message(fuse_name)
@@ -314,7 +314,7 @@ defmodule ExternalService do
     end)
   end
 
-  @spec try_function(atom, retriable_function) ::
+  @spec try_function(fuse_name, retriable_function) ::
           {:error, {:retry, any}} | {:error, :retry} | {:no_retry, any} | no_return
   defp try_function(fuse_name, function) do
     rate_limit = State.get(fuse_name).rate_limit
@@ -337,11 +337,13 @@ defmodule ExternalService do
       reraise error, System.stacktrace()
   end
 
-  defp log_fuse_not_found(fuse_name) when is_atom(fuse_name) do
+  defp log_fuse_not_found(fuse_name) do
     Logger.error(fuse_not_found_message(fuse_name))
   end
 
-  defp fuse_not_found_message(fuse_name) when is_atom(fuse_name) do
+  defp fuse_not_found_message(fuse_name) do
+    fuse_name = inspect(fuse_name)
+
     "Fuse :#{fuse_name} not found. To initialize this fuse, call " <>
       "ExternalService.start(:#{fuse_name}) in your application start code."
   end
