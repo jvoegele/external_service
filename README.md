@@ -245,8 +245,6 @@ case Task.await(task) do
 end
 ```
 
-TODO: provide example of call_async_stream
-
 ## Documentation
 
 See [my blog post](https://ropig.com/blog/use-external-services-safely-reliably-elixir-applications/) for overview documentation, and then check out the [API reference](https://hexdocs.pm/external_service/api-reference.html) for full details.
