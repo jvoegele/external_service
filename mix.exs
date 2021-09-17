@@ -31,9 +31,9 @@ defmodule ExternalService.Mixfile do
       {:retry, "~> 0.14.0"},
       {:ex_rated, "~> 2.0"},
       {:deep_merge, "~> 1.0"},
-      {:ex_doc, "~> 0.22.1", only: :dev, runtime: false},
-      {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
-      {:credo, "~> 1.4", only: [:dev, :test], runtime: false}
+      {:ex_doc, "~> 0.25.2", only: :dev, runtime: false},
+      {:dialyxir, "~> 1.1", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.5", only: [:dev, :test], runtime: false}
     ]
   end
 
