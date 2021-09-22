@@ -46,6 +46,15 @@ defmodule ExternalService do
   @type rate_limit :: {limit :: pos_integer(), time_window :: pos_integer()}
 
   @typedoc """
+  The sleep function to be called when reaching the configured rate limit quota.
+
+  In some situations, like tests, blocking the process for an extended period of
+  time can be undesired. In these cases this function can be changed. Defaults
+  to `Process.sleep/1`.
+  """
+  @type sleep_function :: (number -> any)
+
+  @typedoc """
   Options used for controlling circuit breaker and rate-limiting behavior.
 
   See the [fuse docs](https://hexdocs.pm/fuse/) for further information about available fuse options.
@@ -53,7 +62,8 @@ defmodule ExternalService do
   @type options :: [
           fuse_strategy: fuse_strategy(),
           fuse_refresh: pos_integer(),
-          rate_limit: rate_limit()
+          rate_limit: rate_limit(),
+          sleep_function: sleep_function()
         ]
 
   @default_fuse_options %{
