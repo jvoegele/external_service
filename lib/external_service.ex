@@ -24,7 +24,8 @@ defmodule ExternalService do
   @typedoc "Union type representing all the possible error tuple return values"
   @type error :: retries_exhausted | fuse_blown | fuse_not_found
 
-  @type retriable_function_result :: :retry | ({:retry, reason :: any()}) | (function_result :: any())
+  @type retriable_function_result ::
+          :retry | {:retry, reason :: any()} | (function_result :: any())
 
   @type retriable_function :: (() -> retriable_function_result())
 
@@ -122,7 +123,7 @@ defmodule ExternalService do
     }
 
     :ok = Fuse.install(fuse_name, fuse_opts)
-    rate_limit = RateLimit.new(fuse_name, Keyword.get(options, :rate_limit))
+    rate_limit = RateLimit.new(fuse_name, Keyword.get(options, :rate_limit), options)
     State.init(fuse_name, fuse_opts, rate_limit)
     :ok
   end
@@ -142,7 +143,7 @@ defmodule ExternalService do
 
   After reset, the fuse will be unbroken with no melts.
   """
-  @spec reset_fuse(fuse_name()) :: :ok, {:error, :not_found}
+  @spec(reset_fuse(fuse_name()) :: :ok, {:error, :not_found})
   def reset_fuse(fuse_name), do: Fuse.reset(fuse_name)
 
   @doc """
@@ -263,9 +264,9 @@ defmodule ExternalService do
   end
 
   @spec do_retry(fuse_name(), RetryOptions.t(), retriable_function()) ::
-          {:no_retry, (function_result :: any())}
+          {:no_retry, function_result :: any()}
           | {:error, :retry}
-          | {:error, {:retry, (reason :: any())}}
+          | {:error, {:retry, reason :: any()}}
           | fuse_blown
           | fuse_not_found
           | (function_result :: any())
