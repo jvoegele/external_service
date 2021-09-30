@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.1.2] - 2021-09-30
+
+### Changed
+- Make sleep function configurable ([PR #11 from @doorgan](https://github.com/jvoegele/external_service/pull/11))
+
 ## [1.1.1] - 2021-09-17
 ### Changed
 - Update to fuse 2.5
@@ -31,6 +36,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - Add this changelog...better late than never!
 
 [Unreleased]: https://github.com/jvoegele/external_service/compare/1.0.1...HEAD
+[1.1.2]: https://github.com/jvoegele/external_service/compare/1.1.1...1.1.2
 [1.1.1]: https://github.com/jvoegele/external_service/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/jvoegele/external_service/compare/1.0.1...1.1.0
 [1.0.1]: https://github.com/jvoegele/external_service/compare/1.0.0...1.0.1
