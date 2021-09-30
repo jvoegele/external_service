@@ -167,6 +167,29 @@ defmodule ExternalServiceTest do
 
       assert res == {:error, "reason"}
     end
+
+    test "calls sleep function when rate limit is reached" do
+      fuse_name = "sleep test fuse"
+
+      Process.put(:call_count, 0)
+
+      sleep = fn _ -> Process.put(:sleep_fired, true) end
+
+      ExternalService.start(fuse_name, rate_limit: {5, 10}, sleep_function: sleep)
+
+      for i <- 1..10 do
+        ExternalService.call(fuse_name, fn ->
+          unless Process.get(:sleep_fired) do
+            Process.put(:call_count, Process.get(:call_count) + 1)
+          end
+
+          i
+        end)
+      end
+
+      assert Process.get(:sleep_fired) == true
+      assert Process.get(:call_count) == 5
+    end
   end
 
   describe "call!" do

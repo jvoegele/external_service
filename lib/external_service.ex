@@ -24,7 +24,8 @@ defmodule ExternalService do
   @typedoc "Union type representing all the possible error tuple return values"
   @type error :: retries_exhausted | fuse_blown | fuse_not_found
 
-  @type retriable_function_result :: :retry | ({:retry, reason :: any()}) | (function_result :: any())
+  @type retriable_function_result ::
+          :retry | {:retry, reason :: any()} | (function_result :: any())
 
   @type retriable_function :: (() -> retriable_function_result())
 
@@ -45,6 +46,15 @@ defmodule ExternalService do
   @type rate_limit :: {limit :: pos_integer(), time_window :: pos_integer()}
 
   @typedoc """
+  The sleep function to be called when reaching the configured rate limit quota.
+
+  In some situations, like tests, blocking the process for an extended period of
+  time can be undesired. In these cases this function can be changed. Defaults
+  to `Process.sleep/1`.
+  """
+  @type sleep_function :: (number -> any)
+
+  @typedoc """
   Options used for controlling circuit breaker and rate-limiting behavior.
 
   See the [fuse docs](https://hexdocs.pm/fuse/) for further information about available fuse options.
@@ -52,7 +62,8 @@ defmodule ExternalService do
   @type options :: [
           fuse_strategy: fuse_strategy(),
           fuse_refresh: pos_integer(),
-          rate_limit: rate_limit()
+          rate_limit: rate_limit(),
+          sleep_function: sleep_function()
         ]
 
   @default_fuse_options %{
@@ -122,7 +133,7 @@ defmodule ExternalService do
     }
 
     :ok = Fuse.install(fuse_name, fuse_opts)
-    rate_limit = RateLimit.new(fuse_name, Keyword.get(options, :rate_limit))
+    rate_limit = RateLimit.new(fuse_name, Keyword.get(options, :rate_limit), options)
     State.init(fuse_name, fuse_opts, rate_limit)
     :ok
   end
@@ -142,7 +153,7 @@ defmodule ExternalService do
 
   After reset, the fuse will be unbroken with no melts.
   """
-  @spec reset_fuse(fuse_name()) :: :ok, {:error, :not_found}
+  @spec(reset_fuse(fuse_name()) :: :ok, {:error, :not_found})
   def reset_fuse(fuse_name), do: Fuse.reset(fuse_name)
 
   @doc """
@@ -263,9 +274,9 @@ defmodule ExternalService do
   end
 
   @spec do_retry(fuse_name(), RetryOptions.t(), retriable_function()) ::
-          {:no_retry, (function_result :: any())}
+          {:no_retry, function_result :: any()}
           | {:error, :retry}
-          | {:error, {:retry, (reason :: any())}}
+          | {:error, {:retry, reason :: any()}}
           | fuse_blown
           | fuse_not_found
           | (function_result :: any())

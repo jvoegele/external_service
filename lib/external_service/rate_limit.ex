@@ -20,14 +20,20 @@ defmodule ExternalService.RateLimit do
     end
   end
 
-  def new(_fuse_name, nil), do: %__MODULE__{}
+  def new(fuse_name, fuse_opts, opts \\ [])
 
-  def new(fuse_name, %{time_window: window, limit: limit}), do: new(fuse_name, {limit, window})
+  def new(_fuse_name, nil, _opts), do: %__MODULE__{}
 
-  def new(fuse_name, opts) when is_list(opts),
-    do: new(fuse_name, {Keyword.get(opts, :limit), Keyword.get(opts, :time_window)})
+  def new(fuse_name, %{time_window: window, limit: limit}, opts),
+    do: new(fuse_name, {limit, window}, opts)
 
-  def new(fuse_name, {limit, window}) when is_rate_limit(limit, window) do
+  def new(fuse_name, fuse_opts, opts) when is_list(fuse_opts) do
+    limit = Keyword.get(fuse_opts, :limit)
+    time_window = Keyword.get(fuse_opts, :time_window)
+    new(fuse_name, {limit, time_window}, opts)
+  end
+
+  def new(fuse_name, {limit, window}, opts) when is_rate_limit(limit, window) do
     bucket = bucket_name(fuse_name)
 
     rate_limit = %__MODULE__{
@@ -35,13 +41,13 @@ defmodule ExternalService.RateLimit do
       bucket: bucket,
       limit: limit,
       time_window: window,
-      sleep: &Process.sleep/1
+      sleep: Keyword.get(opts, :sleep_function, &Process.sleep/1)
     }
 
     rate_limit
   end
 
-  def new(_fuse_name, _invalid_args) do
+  def new(_fuse_name, _invalid_args, _options) do
     raise(ArgumentError, message: "Invalid rate limit arguments")
   end
 
@@ -69,7 +75,7 @@ defmodule ExternalService.RateLimit do
   def call(%__MODULE__{}, function, _sleep_count) when is_function(function), do: function.()
 
   @spec bucket_name(atom) :: String.t()
-  def bucket_name(root_fuse_name) when is_atom(root_fuse_name),
+  def bucket_name(root_fuse_name),
     do: to_string(Module.concat(root_fuse_name, __MODULE__))
 
   defp sleep_time(%__MODULE__{limit: limit, time_window: window}),
