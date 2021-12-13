@@ -30,3 +30,5 @@ use Mix.Config
 #     import_config "#{Mix.env}.exs"
 
 config :sasl, :sasl_error_logger, false
+
+import_config "#{Mix.env()}.exs"
