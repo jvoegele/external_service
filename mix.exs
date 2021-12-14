@@ -19,7 +19,7 @@ defmodule ExternalService.Mixfile do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger],
+      extra_applications: [:logger]
       # mod: {ExternalService.Application, []}
     ]
   end
@@ -29,7 +29,8 @@ defmodule ExternalService.Mixfile do
     [
       {:fuse, "~> 2.5"},
       {:retry, "~> 0.14.0"},
-      {:ex_rated, "~> 2.0"},
+      {:ex_rated, "~> 2.0", optional: true},
+      {:hammer, "~> 6.0", optional: true},
       {:deep_merge, "~> 1.0"},
       {:ex_doc, "~> 0.25.2", only: :dev, runtime: false},
       {:dialyxir, "~> 1.1", only: [:dev, :test], runtime: false},

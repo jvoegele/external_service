@@ -16,6 +16,11 @@ defmodule ExternalServiceTest do
     expiry: 1
   }
 
+  setup_all do
+    {:ok, _} = start_supervised({ExRated, [[], [name: :ex_rated]]})
+    :ok
+  end
+
   describe "uninitialized fuse" do
     test "call returns :fuse_not_found error" do
       result = ExternalService.call(:testing_nonexistent_fuse, fn -> :noop end)

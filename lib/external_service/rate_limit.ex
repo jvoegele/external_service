@@ -60,7 +60,7 @@ defmodule ExternalService.RateLimit do
         sleep_count
       )
       when is_rate_limit(limit, window) and is_function(function) do
-    case ExRated.check_rate(bucket, window, limit) do
+    case rate_limit_backend().check_rate(bucket, window, limit) do
       {:ok, _} ->
         function.()
 
@@ -96,9 +96,13 @@ defmodule ExternalService.RateLimit do
       Logger.debug(fn ->
         [
           "[ExternalService] ExRated bucket info: ",
-          inspect(ExRated.inspect_bucket(bucket, window, limit))
+          inspect(rate_limit_backend().inspect_bucket(bucket, window, limit))
         ]
       end)
     end
+  end
+
+  defp rate_limit_backend do
+    Application.get_env(:external_service, :rate_limit_backend)
   end
 end

@@ -4,6 +4,11 @@ defmodule ExternalService.RateLimitTest do
 
   @moduletag capture_log: true
 
+  setup_all do
+    {:ok, _} = start_supervised({ExRated, [[], [name: :ex_rated]]})
+    :ok
+  end
+
   describe "new/2" do
     test "calling with nil makes an empty RateLimit struct" do
       assert RateLimit.new(:foo, nil) == %RateLimit{}
