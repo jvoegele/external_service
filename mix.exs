@@ -28,7 +28,7 @@ defmodule ExternalService.Mixfile do
   defp deps do
     [
       {:fuse, "~> 2.5"},
-      {:retry, "~> 0.14.0"},
+      {:retry, "~> 0.15.0"},
       {:ex_rated, "~> 2.0"},
       {:deep_merge, "~> 1.0"},
       {:ex_doc, "~> 0.25.2", only: :dev, runtime: false},
