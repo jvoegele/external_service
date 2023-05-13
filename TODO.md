@@ -13,11 +13,14 @@ TODO items for external_service
   - [ ] Break up large README into focused guides
   - [ ] Incorporate ExDoc "cheat sheets" for retry techniques, circuit breaker usage, etc.
   - [ ] Provide guidance for when and how to use ExternalService.Gateway
+  - [ ] Remove obsolete sponsorship message
+- [ ] Set up sponsorship in GitHub and/or Hex?
 - [ ] Improve error reporting
   - [ ] Use structured errors in {:error, tuples}
   - [ ] Ensure exceptions include all relevant details
 - [ ] Consider using Flow for call_async_stream
 - [ ] Make fuse and retry configuration more readable and discoverable
+- [ ] Use decorator annotations for marking functions as external calls that use given retry opts?
 - [ ] Improve encapsulation of third-party libraries (fuse, retry, ex_rated)
   - [ ] Consider removing some or all of those dependencies
 
