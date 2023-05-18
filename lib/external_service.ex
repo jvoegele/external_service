@@ -170,7 +170,7 @@ defmodule ExternalService do
   @spec call(fuse_name(), RetryOptions.t(), retriable_function()) ::
           error | (function_result :: any)
   def call(fuse_name, retry_opts \\ %RetryOptions{}, function) do
-    case do_retry(fuse_name, retry_opts, function) do
+    case call_with_retry(fuse_name, retry_opts, function) do
       {:no_retry, result} -> result
       {:error, :retry} -> {:error, {:retries_exhausted, :reason_unknown}}
       {:error, {:retry, reason}} -> {:error, {:retries_exhausted, reason}}
@@ -184,7 +184,7 @@ defmodule ExternalService do
   @spec call!(fuse_name(), RetryOptions.t(), retriable_function()) ::
           function_result :: any | no_return
   def call!(fuse_name, retry_opts \\ %RetryOptions{}, function) do
-    case do_retry(fuse_name, retry_opts, function) do
+    case call_with_retry(fuse_name, retry_opts, function) do
       {:no_retry, result} ->
         result
 
@@ -273,14 +273,14 @@ defmodule ExternalService do
     Task.async_stream(enumerable, fun, async_opts)
   end
 
-  @spec do_retry(fuse_name(), RetryOptions.t(), retriable_function()) ::
+  @spec call_with_retry(fuse_name(), RetryOptions.t(), retriable_function()) ::
           {:no_retry, function_result :: any()}
           | {:error, :retry}
           | {:error, {:retry, reason :: any()}}
           | fuse_blown
           | fuse_not_found
           | (function_result :: any())
-  defp do_retry(fuse_name, retry_opts, function) do
+  defp call_with_retry(fuse_name, retry_opts, function) do
     require Retry
 
     Retry.retry with: apply_retry_options(retry_opts), rescue_only: retry_opts.rescue_only do
