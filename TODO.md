@@ -20,6 +20,8 @@ TODO items for external_service
   - [ ] Ensure exceptions include all relevant details
 - [ ] Consider using Flow for call_async_stream
 - [ ] Make fuse and retry configuration more readable and discoverable
+- [ ] Optionally pass fuse and/or retry info to anonymous functions passed to the various `call` functions
+- [ ] Telemetry integration: events for external calls, throttling due to rate limit, etc.
 - [ ] Use decorator annotations for marking functions as external calls that use given retry opts?
 - [ ] Improve encapsulation of third-party libraries (fuse, retry, ex_rated)
   - [ ] Consider removing some or all of those dependencies
@@ -27,6 +29,7 @@ TODO items for external_service
 ### In Progress
 
 - [ ] Fix sporadically failing test: test/external_service_test.exs:171
+- [ ] Make ExternalService.Gateway.Config 100% resilient (Don't link to other processes? Use Elixir's Registry?)
 
 ### Done ✓
 
