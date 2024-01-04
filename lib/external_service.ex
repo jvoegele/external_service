@@ -345,7 +345,7 @@ defmodule ExternalService do
   rescue
     error ->
       Fuse.melt(fuse_name)
-      reraise error, System.stacktrace()
+      reraise error, __STACKTRACE__
   end
 
   defp log_fuse_not_found(fuse_name) do
