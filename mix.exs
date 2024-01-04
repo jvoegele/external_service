@@ -4,7 +4,7 @@ defmodule ExternalService.Mixfile do
   def project do
     [
       app: :external_service,
-      version: "1.1.3",
+      version: "1.1.4",
       description:
         "Elixir library for safely using any external service or API using automatic retry with rate limiting and circuit breakers. Calls to external services can be synchronous, asynchronous background tasks, or multiple calls can be made in parallel for MapReduce style processing.",
       source_url: "https://github.com/jvoegele/external_service",
@@ -19,7 +19,7 @@ defmodule ExternalService.Mixfile do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger],
+      extra_applications: [:logger]
       # mod: {ExternalService.Application, []}
     ]
   end

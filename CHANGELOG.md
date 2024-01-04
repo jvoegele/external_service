@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## 1.1.4 - 2024-01-04
+### Fixed
+- Replace use of deprecated `System.stacktrace/0` with `__STACKTRACE__/0` ([PR #17 from @iperks](https://github.com/jvoegele/external_service/pull/17))
+
 ## [1.1.3] - 2023-05-12
 ### Changed
 - Update to retry 0.18.0

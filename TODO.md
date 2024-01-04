@@ -13,7 +13,7 @@ TODO items for external_service
   - [ ] Break up large README into focused guides
   - [ ] Incorporate ExDoc "cheat sheets" for retry techniques, circuit breaker usage, etc.
   - [ ] Provide guidance for when and how to use ExternalService.Gateway
-  - [ ] Remove obsolete sponsorship message
+  - [x] Remove obsolete sponsorship message
 - [ ] Set up sponsorship in GitHub and/or Hex?
 - [ ] Improve error reporting
   - [ ] Use structured errors in {:error, tuples}
