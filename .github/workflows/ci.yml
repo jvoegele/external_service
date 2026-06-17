@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Oldest supported Elixir (mix.exs declares ~> 1.15) across its OTPs
+          - elixir: "1.15.8"
+            otp: "25.3"
+          - elixir: "1.15.8"
+            otp: "26.2"
+          - elixir: "1.16.3"
+            otp: "26.2"
+          # 1.17 is the first Elixir to support OTP 27
+          - elixir: "1.17.3"
+            otp: "26.2"
+          - elixir: "1.17.3"
+            otp: "27.2"
+          # Recent stable
+          - elixir: "1.18.4"
+            otp: "26.2"
+          - elixir: "1.18.4"
+            otp: "27.2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - name: Cache deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - run: mix deps.get
+      - run: mix test
+
+  quality:
+    name: Quality (format, credo, docs)
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18.4"
+          otp-version: "27.2"
+
+      - name: Cache deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-quality-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-quality-
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+      - run: mix format --check-formatted
+      - run: mix credo --strict
+      - name: Build docs
+        run: MIX_ENV=dev mix docs
+
+  dialyzer:
+    name: Dialyzer
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18.4"
+          otp-version: "27.2"
+
+      - name: Cache deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-dialyzer-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-dialyzer-
+
+      # The PLT only changes when the OTP/Elixir/deps change, so cache it
+      # separately and keep it across runs to avoid the slow rebuild.
+      - name: Cache PLT
+        uses: actions/cache@v4
+        with:
+          path: priv/plts
+          key: ${{ runner.os }}-plt-1.18.4-27.2-${{ hashFiles('**/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-plt-1.18.4-27.2-
+
+      - run: mix deps.get
+      - run: mix dialyzer --plt
+      - run: mix dialyzer --format github

@@ -1,18 +1,33 @@
 defmodule ExternalService.Mixfile do
   use Mix.Project
 
+  @version "2.0.0-dev"
+  @source_url "https://github.com/jvoegele/external_service"
+
   def project do
     [
       app: :external_service,
-      version: "1.1.4",
+      version: @version,
+      elixir: "~> 1.15",
+      elixirc_paths: elixirc_paths(Mix.env()),
+      start_permanent: Mix.env() == :prod,
+      deps: deps(),
+
+      # Dialyzer: keep PLTs in a stable, cacheable location for CI
+      dialyzer: [
+        plt_local_path: "priv/plts",
+        plt_core_path: "priv/plts"
+      ],
+
+      # Hex
       description:
         "Elixir library for safely using any external service or API using automatic retry with rate limiting and circuit breakers. Calls to external services can be synchronous, asynchronous background tasks, or multiple calls can be made in parallel for MapReduce style processing.",
-      source_url: "https://github.com/jvoegele/external_service",
-      elixir: "~> 1.4",
-      start_permanent: Mix.env() == :prod,
       package: package(),
-      docs: docs(),
-      deps: deps()
+
+      # Docs
+      name: "ExternalService",
+      source_url: @source_url,
+      docs: docs()
     ]
   end
 
@@ -20,38 +35,49 @@ defmodule ExternalService.Mixfile do
   def application do
     [
       extra_applications: [:logger]
-      # mod: {ExternalService.Application, []}
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
       {:fuse, "~> 2.5"},
-      {:retry, "~> 0.18.0"},
+      {:retry, "~> 0.18"},
       {:ex_rated, "~> 2.1"},
       {:deep_merge, "~> 1.0"},
-      {:ex_doc, "~> 0.29.4", only: :dev, runtime: false},
-      {:dialyxir, "~> 1.3", only: [:dev, :test], runtime: false},
+      {:nimble_options, "~> 1.1"},
+      {:telemetry, "~> 1.0"},
+      {:ex_doc, "~> 0.31", only: :dev, runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 
   defp package do
-    # These are the default files included in the package
     [
       name: :external_service,
-      files: ["lib", "mix.exs", "README*", "LICENSE*"],
+      files: ["lib", "mix.exs", "README.md", "LICENSE", "CHANGELOG.md"],
       maintainers: ["Jason Voegele"],
-      licenses: ["Apache 2.0"],
-      links: %{"GitHub" => "https://github.com/jvoegele/external_service"}
+      licenses: ["Apache-2.0"],
+      links: %{"GitHub" => @source_url}
     ]
   end
 
   defp docs do
     [
-      extras: ["README.md"],
-      main: "readme"
+      main: "readme",
+      extras: [
+        "README.md": [title: "Overview"],
+        "CHANGELOG.md": [title: "Changelog"],
+        LICENSE: [title: "License"]
+      ],
+      filter_modules: fn _module, meta ->
+        # Tag modules with `@moduledoc internal: true` to exclude them from docs.
+        not Map.get(meta, :internal, false)
+      end
     ]
   end
 end

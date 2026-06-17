@@ -16,6 +16,9 @@
 # Ignore elixir LS files
 /.elixir_ls
 
+# Dialyzer PLTs (cached in CI, regenerated locally)
+/priv/plts
+
 # Ignore swp files
 
 *.sw[opn]

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+Work toward 2.0 (see `ROADMAP.md`). The 2.0 line modernizes the project and
+introduces breaking changes; a migration guide will accompany the release.
+
+### Changed
+- Raise the minimum Elixir requirement to `~> 1.15`.
+- Modernize the build: refreshed dependency versions, added `nimble_options` and
+  `telemetry`, ExDoc/Dialyxir bumps, GitHub Actions CI (test matrix, quality, and
+  Dialyzer jobs), and Hex package/docs metadata cleanup.
+
 ## 1.1.4 - 2024-01-04
 ### Fixed
 - Replace use of deprecated `System.stacktrace/0` with `__STACKTRACE__/0` ([PR #17 from @iperks](https://github.com/jvoegele/external_service/pull/17))
