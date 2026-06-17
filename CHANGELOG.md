@@ -20,6 +20,10 @@ introduces breaking changes; a migration guide will accompany the release.
   `[:external_service, :circuit_breaker, :blown]`, and
   `[:external_service, :rate_limit, :sleep]`. See the `ExternalService` module
   docs for measurements and metadata.
+- `RetryOptions.max_attempts` to bound the total number of attempts (initial plus
+  retries), complementing the existing time-based `:expiry`.
+- `RetryOptions.randomize` now also accepts a float jitter proportion (e.g.
+  `0.25` for +/- 25%) in addition to `true`/`false`.
 
 ### Fixed
 - `ExternalService.Gateway` now applies the `fuse: [strategy:, refresh:]` options

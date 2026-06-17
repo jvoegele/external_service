@@ -438,6 +438,52 @@ defmodule ExternalServiceTest do
     end
   end
 
+  describe "retry options" do
+    test "max_attempts limits the total number of attempts" do
+      name = start_fuse(:"max-attempts-test")
+      Process.put(:count, 0)
+      opts = %RetryOptions{backoff: {:linear, 0, 1}, max_attempts: 3}
+
+      result =
+        ExternalService.call(name, opts, fn ->
+          Process.put(:count, Process.get(:count) + 1)
+          :retry
+        end)
+
+      assert Process.get(:count) == 3
+      assert result == {:error, {:retries_exhausted, :reason_unknown}}
+    end
+
+    test "max_attempts of 1 makes a single attempt with no retries" do
+      name = start_fuse(:"max-attempts-one")
+      Process.put(:count, 0)
+      opts = %RetryOptions{backoff: {:linear, 0, 1}, max_attempts: 1}
+
+      ExternalService.call(name, opts, fn ->
+        Process.put(:count, Process.get(:count) + 1)
+        :retry
+      end)
+
+      assert Process.get(:count) == 1
+    end
+
+    test "jitter affects only delay, not the attempt count" do
+      for randomize <- [true, 0.5] do
+        name = start_fuse(:"jitter-test-#{inspect(randomize)}")
+        counter = {:jitter_count, randomize}
+        Process.put(counter, 0)
+        opts = %RetryOptions{backoff: {:linear, 0, 1}, randomize: randomize, max_attempts: 3}
+
+        ExternalService.call(name, opts, fn ->
+          Process.put(counter, Process.get(counter) + 1)
+          :retry
+        end)
+
+        assert Process.get(counter) == 3
+      end
+    end
+  end
+
   describe "introspection" do
     setup do
       name = :"introspection-test"

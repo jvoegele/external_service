@@ -429,16 +429,32 @@ defmodule ExternalService do
         {:linear, initial_delay, factor} -> linear_backoff(initial_delay, factor)
       end
 
-    retry_opts
-    |> Map.take([:randomize, :expiry, :cap])
-    |> Enum.reduce(delay_stream, fn {key, value}, acc ->
-      if value do
-        apply(Retry.DelayStreams, key, [acc, value])
-      else
-        acc
-      end
-    end)
+    delay_stream
+    |> apply_randomize(retry_opts.randomize)
+    |> apply_if(retry_opts.cap, &cap/2)
+    |> apply_if(retry_opts.expiry, &expiry/2)
+    |> apply_max_attempts(retry_opts.max_attempts)
   end
+
+  # `randomize` accepts a boolean or an explicit jitter proportion. Note that
+  # `Retry.DelayStreams.randomize/2` expects a number, so a bare `true` must use
+  # the arity-1 default rather than being passed through.
+  defp apply_randomize(stream, proportion) when is_number(proportion),
+    do: Retry.DelayStreams.randomize(stream, proportion)
+
+  defp apply_randomize(stream, true), do: Retry.DelayStreams.randomize(stream)
+  defp apply_randomize(stream, _falsy), do: stream
+
+  defp apply_if(stream, nil, _fun), do: stream
+  defp apply_if(stream, value, fun), do: fun.(stream, value)
+
+  # `max_attempts` counts the initial attempt plus retries, so the delay stream
+  # (one delay per retry) is limited to `max_attempts - 1` elements.
+  defp apply_max_attempts(stream, nil), do: stream
+
+  defp apply_max_attempts(stream, max_attempts)
+       when is_integer(max_attempts) and max_attempts > 0,
+       do: Stream.take(stream, max_attempts - 1)
 
   @spec try_function(fuse_name, retriable_function) ::
           {:error, {:retry, any}} | {:error, :retry} | {:no_retry, any} | no_return
