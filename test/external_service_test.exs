@@ -67,7 +67,10 @@ defmodule ExternalServiceTest do
 
     setup do
       Process.put(@fuse_name, 0)
-      ExternalService.start(@fuse_name, fuse_strategy: {:standard, @fuse_retries, 10_000})
+
+      ExternalService.start(@fuse_name,
+        circuit_breaker: [tolerate: @fuse_retries, within: 10_000]
+      )
     end
 
     test "calls function once when successful" do
@@ -216,7 +219,7 @@ defmodule ExternalServiceTest do
       # A wide window guarantees that all 10 calls fall within a single window,
       # so the limit is reliably reached on the 6th call regardless of timing.
       ExternalService.start(fuse_name,
-        rate_limit: {5, :timer.minutes(1)},
+        rate_limit: [limit: 5, per: :timer.minutes(1)],
         sleep_function: sleep
       )
 
@@ -240,7 +243,10 @@ defmodule ExternalServiceTest do
 
     setup do
       Process.put(@fuse_name, 0)
-      ExternalService.start(@fuse_name, fuse_strategy: {:standard, @fuse_retries, 10_000})
+
+      ExternalService.start(@fuse_name,
+        circuit_breaker: [tolerate: @fuse_retries, within: 10_000]
+      )
     end
 
     test "calls function once when successful" do
@@ -339,7 +345,9 @@ defmodule ExternalServiceTest do
 
   describe "call_async" do
     setup do
-      ExternalService.start(@fuse_name, fuse_strategy: {:standard, @fuse_retries, 10_000})
+      ExternalService.start(@fuse_name,
+        circuit_breaker: [tolerate: @fuse_retries, within: 10_000]
+      )
     end
 
     test "returns a Task" do
@@ -353,7 +361,7 @@ defmodule ExternalServiceTest do
       # A high failure tolerance keeps the shared fuse from blowing, so each
       # element's result is deterministic regardless of how the stream is
       # scheduled across processes.
-      ExternalService.start(@fuse_name, fuse_strategy: {:standard, 100, 10_000})
+      ExternalService.start(@fuse_name, circuit_breaker: [tolerate: 100, within: 10_000])
     end
 
     def function(arg), do: arg
@@ -418,7 +426,7 @@ defmodule ExternalServiceTest do
 
       assert :ok = ExternalService.start(name)
       assert :fuse.ask(name, :sync) == :ok
-      assert %ExternalService.State{fuse_name: ^name} = ExternalService.State.get(name)
+      assert %ExternalService.State{service: ^name} = ExternalService.State.get(name)
 
       assert :ok = ExternalService.stop(name)
       assert :fuse.ask(name, :sync) == {:error, :not_found}
@@ -435,7 +443,11 @@ defmodule ExternalServiceTest do
     test "exercising the fuse monitor does not crash it" do
       name = :"fault-injection-test"
 
-      assert :ok = ExternalService.start(name, fuse_strategy: {:fault_injection, 0.5, 5, 1_000})
+      assert :ok =
+               ExternalService.start(name,
+                 circuit_breaker: [tolerate: 5, within: 1_000, fault_injection: 0.5]
+               )
+
       monitor = Process.whereis(:fuse_monitor)
       assert is_pid(monitor)
 
@@ -523,7 +535,7 @@ defmodule ExternalServiceTest do
   describe "introspection" do
     setup do
       name = :"introspection-test"
-      ExternalService.start(name, fuse_strategy: {:standard, 1, 10_000})
+      ExternalService.start(name, circuit_breaker: [tolerate: 1, within: 10_000])
       on_exit(fn -> ExternalService.stop(name) end)
       [name: name]
     end
@@ -547,7 +559,7 @@ defmodule ExternalServiceTest do
 
     test "all_available? requires every service to be available", %{name: name} do
       other = :"introspection-test-2"
-      ExternalService.start(other, fuse_strategy: {:standard, 1, 10_000})
+      ExternalService.start(other, circuit_breaker: [tolerate: 1, within: 10_000])
       on_exit(fn -> ExternalService.stop(other) end)
 
       assert ExternalService.all_available?([name, other])
@@ -620,7 +632,7 @@ defmodule ExternalServiceTest do
     end
 
     test "emits a circuit_breaker blown event when the breaker is open" do
-      name = start_fuse(:"telemetry-blown", fuse_strategy: {:standard, 1, 10_000})
+      name = start_fuse(:"telemetry-blown", circuit_breaker: [tolerate: 1, within: 10_000])
       blow_fuse(name)
       ExternalService.call(name, fn -> :ok end)
 
@@ -632,7 +644,12 @@ defmodule ExternalServiceTest do
       name = :"telemetry-rate-limit"
       bucket = ExternalService.RateLimit.bucket_name(name)
       sleep = fn _time -> ExRated.delete_bucket(bucket) end
-      ExternalService.start(name, rate_limit: {1, :timer.minutes(1)}, sleep_function: sleep)
+
+      ExternalService.start(name,
+        rate_limit: [limit: 1, per: :timer.minutes(1)],
+        sleep_function: sleep
+      )
+
       on_exit(fn -> ExternalService.stop(name) end)
 
       ExternalService.call(name, fn -> :ok end)
@@ -652,7 +669,7 @@ defmodule ExternalServiceTest do
 
   # Starts a service with a high failure tolerance (so it won't blow) unless
   # overridden, registers cleanup, and returns its name.
-  defp start_fuse(name, options \\ [fuse_strategy: {:standard, 100, 10_000}]) do
+  defp start_fuse(name, options \\ [circuit_breaker: [tolerate: 100, within: 10_000]]) do
     ExternalService.start(name, options)
     on_exit(fn -> ExternalService.stop(name) end)
     name

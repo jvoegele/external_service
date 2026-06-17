@@ -4,7 +4,7 @@ defmodule ExternalService.RateLimit do
   require Logger
 
   @opaque t :: %__MODULE__{
-            fuse: ExternalService.fuse_name(),
+            fuse: ExternalService.service(),
             bucket: String.t(),
             limit: pos_integer,
             time_window: pos_integer,

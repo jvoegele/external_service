@@ -22,8 +22,16 @@ introduces breaking changes; a migration guide will accompany the release.
   docs for measurements and metadata.
 - `RetryOptions.max_attempts` to bound the total number of attempts (initial plus
   retries), complementing the existing time-based `:expiry`.
-- `RetryOptions.randomize` now also accepts a float jitter proportion (e.g.
-  `0.25` for +/- 25%) in addition to `true`/`false`.
+- `RetryOptions.jitter` to control random jitter on retry delays (`true` for
+  +/- 10%, or a float proportion such as `0.25`).
+- **Declarative module front door**: `use ExternalService` generates a small
+  wrapper (`call/1,2`, `call!/1,2`, async/stream variants, `available?/0`,
+  `blown?/0`, `reset/0`, `child_spec/1`, `start_link/1`) around a service
+  configured with validated `:circuit_breaker`/`:rate_limit`/`:retry` options.
+- A service now remembers the default retry options given to `start/2`; the
+  two-argument `call/2` (and `call!/2`, `call_async/2`) use that default.
+- Option validation via NimbleOptions for `start/2` and `RetryOptions`, with the
+  accepted options rendered into the docs.
 - Structured error types (built on [Errata](https://hexdocs.pm/errata)):
   `ExternalService.RetriesExhausted`, `ExternalService.CircuitBreakerOpen`, and
   `ExternalService.ServiceNotStarted`. Each is an exception struct carrying a
@@ -47,6 +55,25 @@ introduces breaking changes; a migration guide will accompany the release.
   Results returned directly by the wrapped function (including its own
   `{:error, reason}` values) are unchanged. A full migration guide will ship with
   2.0.
+- **Configuration and terminology overhauled** to drop the leaked "fuse" wording:
+  - `start/2` now takes `circuit_breaker: [tolerate:, within:, reset:, fault_injection:]`
+    and `rate_limit: [limit:, per:]` (and an optional `retry:`) instead of
+    `fuse_strategy: {:standard, max, window}` / `fuse_refresh:` and the
+    `rate_limit: {limit, window}` tuple. Options are validated by NimbleOptions.
+  - The `fuse_name` argument/type is now `service`.
+  - `reset_fuse/1` is now `reset/1`.
+- **Retry options reshaped** (`ExternalService.RetryOptions`):
+  - `backoff` is now `:exponential` / `:linear` with separate `:base` and
+    `:factor`, instead of `{:exponential, delay}` / `{:linear, delay, factor}`.
+  - `randomize` is now `jitter`.
+  - `rescue_only` is now `retry_on`, and **defaults to `[]`** — raised exceptions
+    are no longer retried by default ([issue #7](https://github.com/jvoegele/external_service/issues/7)).
+    List exception modules in `:retry_on` to retry on them.
+  - `call/3` and `call!/3` now also accept a keyword list of retry options.
+- `use ExternalService.Gateway` is **deprecated** in favor of `use ExternalService`.
+  It still works (emitting a deprecation warning) and keeps the `external_call/*`
+  and `reset_fuse/0` names as aliases, but uses the same new option shape as
+  `use ExternalService` — the old `fuse: [...]` options are no longer supported.
 
 ### Removed (breaking)
 - The `ExternalService.RetriesExhaustedError`, `ExternalService.FuseBlownError`,
