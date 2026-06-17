@@ -15,6 +15,11 @@ introduces breaking changes; a migration guide will accompany the release.
   `ExternalService.available?/1`, `ExternalService.blown?/1`, and
   `ExternalService.all_available?/1`, plus `available?/0` and `blown?/0` on
   modules using `ExternalService.Gateway`.
+- `:telemetry` events for guarded calls: `[:external_service, :call, :start | :stop | :exception]`
+  (a span around each call), `[:external_service, :call, :retry]`,
+  `[:external_service, :circuit_breaker, :blown]`, and
+  `[:external_service, :rate_limit, :sleep]`. See the `ExternalService` module
+  docs for measurements and metadata.
 
 ### Fixed
 - `ExternalService.Gateway` now applies the `fuse: [strategy:, refresh:]` options
