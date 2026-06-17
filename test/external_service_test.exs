@@ -38,6 +38,11 @@ defmodule ExternalServiceTest do
 
   describe "stop" do
     test "removes a fuse" do
+      # Start the fuse here rather than relying on another test having installed
+      # it first; ExUnit randomizes test order, so this test must be independent.
+      ExternalService.start(@fuse_name)
+      assert :fuse.ask(@fuse_name, :sync) == :ok
+
       ExternalService.stop(@fuse_name)
       assert :fuse.ask(@fuse_name, :sync) == {:error, :not_found}
     end
@@ -170,12 +175,25 @@ defmodule ExternalServiceTest do
 
     test "calls sleep function when rate limit is reached" do
       fuse_name = "sleep test fuse"
+      bucket = ExternalService.RateLimit.bucket_name(fuse_name)
 
       Process.put(:call_count, 0)
 
-      sleep = fn _ -> Process.put(:sleep_fired, true) end
+      sleep = fn _time ->
+        Process.put(:sleep_fired, true)
+        # Clear the rate-limit window so the throttled call proceeds immediately.
+        # The previous version relied on a tiny (10ms) window elapsing during the
+        # calls, which made this test flaky on slow CI runners where the calls
+        # straddled the window and the limit was never reached.
+        ExRated.delete_bucket(bucket)
+      end
 
-      ExternalService.start(fuse_name, rate_limit: {5, 10}, sleep_function: sleep)
+      # A wide window guarantees that all 10 calls fall within a single window,
+      # so the limit is reliably reached on the 6th call regardless of timing.
+      ExternalService.start(fuse_name,
+        rate_limit: {5, :timer.minutes(1)},
+        sleep_function: sleep
+      )
 
       for i <- 1..10 do
         ExternalService.call(fuse_name, fn ->

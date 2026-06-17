@@ -3,8 +3,8 @@ defmodule ExternalService do
   ExternalService handles all retry and circuit breaker logic for calls to external services.
   """
 
-  alias ExternalService.RetryOptions
   alias ExternalService.RateLimit
+  alias ExternalService.RetryOptions
   alias :fuse, as: Fuse
 
   require Logger
@@ -27,7 +27,7 @@ defmodule ExternalService do
   @type retriable_function_result ::
           :retry | {:retry, reason :: any()} | (function_result :: any())
 
-  @type retriable_function :: (() -> retriable_function_result())
+  @type retriable_function :: (-> retriable_function_result())
 
   @typedoc """
   Strategy controlling fuse behavior.

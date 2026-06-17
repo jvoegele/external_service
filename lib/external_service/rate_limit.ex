@@ -51,7 +51,7 @@ defmodule ExternalService.RateLimit do
     raise(ArgumentError, message: "Invalid rate limit arguments")
   end
 
-  @spec call(t, (() -> any), non_neg_integer) :: any
+  @spec call(t, (-> any), non_neg_integer) :: any
   def call(rate_limit, function, sleep_count \\ 0)
 
   def call(

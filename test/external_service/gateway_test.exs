@@ -50,15 +50,17 @@ defmodule ExternalService.GatewayTest do
     end
 
     test "merges gateway configuration with start options" do
-      {:ok, pid} = TestGateway.start_link(
-        fuse: [
-          refresh: 999
-        ],
-        rate_limit: {9, 999},
-        retry: [
-          expiry: 999
-        ]
-      )
+      {:ok, pid} =
+        TestGateway.start_link(
+          fuse: [
+            refresh: 999
+          ],
+          rate_limit: {9, 999},
+          retry: [
+            expiry: 999
+          ]
+        )
+
       assert is_pid(pid)
 
       assert TestGateway.gateway_config() == [
