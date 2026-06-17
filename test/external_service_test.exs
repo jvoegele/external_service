@@ -1,7 +1,10 @@
 defmodule ExternalServiceTest do
   use ExUnit.Case
   alias ExternalService
+  alias ExternalService.CircuitBreakerOpen
+  alias ExternalService.RetriesExhausted
   alias ExternalService.RetryOptions
+  alias ExternalService.ServiceNotStarted
 
   @moduletag capture_log: true
 
@@ -17,13 +20,14 @@ defmodule ExternalServiceTest do
   }
 
   describe "uninitialized fuse" do
-    test "call returns :fuse_not_found error" do
+    test "call returns a ServiceNotStarted error" do
       result = ExternalService.call(:testing_nonexistent_fuse, fn -> :noop end)
-      assert result == {:error, {:fuse_not_found, :testing_nonexistent_fuse}}
+
+      assert {:error, %ServiceNotStarted{context: %{service: :testing_nonexistent_fuse}}} = result
     end
 
-    test "call! raises FuseNotFoundError" do
-      assert_raise ExternalService.FuseNotFoundError, fn ->
+    test "call! raises ServiceNotStarted" do
+      assert_raise ServiceNotStarted, fn ->
         ExternalService.call!(:testing_nonexistent_fuse, fn -> :noop end)
       end
     end
@@ -120,40 +124,40 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == 1
     end
 
-    test "returns fuse_blown when the fuse is blown by retries" do
+    test "returns CircuitBreakerOpen when the fuse is blown by retries" do
       res =
         ExternalService.call(@fuse_name, @retry_opts, fn ->
           :retry
         end)
 
-      assert res == {:error, {:fuse_blown, @fuse_name}}
+      assert {:error, %CircuitBreakerOpen{context: %{service: @fuse_name}}} = res
     end
 
-    test "returns fuse_blown when the fuse is blown by exceptions" do
+    test "returns CircuitBreakerOpen when the fuse is blown by exceptions" do
       res =
         ExternalService.call(@fuse_name, @retry_opts, fn ->
           raise "KABOOM!"
         end)
 
-      assert res == {:error, {:fuse_blown, @fuse_name}}
+      assert {:error, %CircuitBreakerOpen{context: %{service: @fuse_name}}} = res
     end
 
-    test "returns :error when retries are exhausted with :retry" do
+    test "returns RetriesExhausted when retries are exhausted with :retry" do
       res =
         ExternalService.call(@fuse_name, @expiring_retry_options, fn ->
           :retry
         end)
 
-      assert res == {:error, {:retries_exhausted, :reason_unknown}}
+      assert {:error, %RetriesExhausted{context: %{reason: :reason_unknown}}} = res
     end
 
-    test "returns :error when retries are exhausted with a reason" do
+    test "returns RetriesExhausted carrying the reason when retries are exhausted with a reason" do
       res =
         ExternalService.call(@fuse_name, @expiring_retry_options, fn ->
           {:retry, "reason"}
         end)
 
-      assert res == {:error, {:retries_exhausted, "reason"}}
+      assert {:error, %RetriesExhausted{context: %{service: @fuse_name, reason: "reason"}}} = res
     end
 
     test "propagates original exception when retries are exhausted by an exception" do
@@ -234,7 +238,7 @@ defmodule ExternalServiceTest do
           :retry
         end)
       rescue
-        ExternalService.FuseBlownError -> :ok
+        CircuitBreakerOpen -> :ok
       end
 
       assert Process.get(@fuse_name) == @fuse_retries + 1
@@ -260,34 +264,40 @@ defmodule ExternalServiceTest do
           raise "KABOOM!"
         end)
       rescue
-        ExternalService.FuseBlownError -> :ok
+        CircuitBreakerOpen -> :ok
       end
 
       assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
-    test "raises FuseBlownError when the fuse is blown by retries" do
-      assert_raise ExternalService.FuseBlownError, inspect(@fuse_name), fn ->
-        ExternalService.call!(@fuse_name, @retry_opts, fn -> :retry end)
-      end
+    test "raises CircuitBreakerOpen when the fuse is blown by retries" do
+      error =
+        assert_raise CircuitBreakerOpen, fn ->
+          ExternalService.call!(@fuse_name, @retry_opts, fn -> :retry end)
+        end
+
+      assert error.context.service == @fuse_name
     end
 
-    test "raises FuseBlownError when the fuse is blown by exceptions" do
-      assert_raise ExternalService.FuseBlownError, inspect(@fuse_name), fn ->
+    test "raises CircuitBreakerOpen when the fuse is blown by exceptions" do
+      assert_raise CircuitBreakerOpen, fn ->
         ExternalService.call!(@fuse_name, @retry_opts, fn -> raise "KABOOM!" end)
       end
     end
 
-    test "raises RetriesExhaustedError when retries are exhausted with :retry" do
-      assert_raise ExternalService.RetriesExhaustedError, fn ->
+    test "raises RetriesExhausted when retries are exhausted with :retry" do
+      assert_raise RetriesExhausted, fn ->
         ExternalService.call!(@fuse_name, @expiring_retry_options, fn -> :retry end)
       end
     end
 
-    test "raises RetriesExhaustedError when retries are exhausted with a reason" do
-      assert_raise ExternalService.RetriesExhaustedError, fn ->
-        ExternalService.call!(@fuse_name, @expiring_retry_options, fn -> {:retry, "reason"} end)
-      end
+    test "raises RetriesExhausted when retries are exhausted with a reason" do
+      error =
+        assert_raise RetriesExhausted, fn ->
+          ExternalService.call!(@fuse_name, @expiring_retry_options, fn -> {:retry, "reason"} end)
+        end
+
+      assert error.context.reason == "reason"
     end
 
     test "propagates original exception when retries are exhausted by an exception" do
@@ -336,10 +346,10 @@ defmodule ExternalServiceTest do
       assert [
                {:ok, _},
                {:ok, _},
-               {:ok, {:error, {:fuse_blown, :"test-fuse"}}},
+               {:ok, {:error, %CircuitBreakerOpen{}}},
                {:ok, _},
                {:ok, _},
-               {:ok, {:error, {:fuse_blown, :"test-fuse"}}}
+               {:ok, {:error, %CircuitBreakerOpen{}}}
              ] = results
     end
 
@@ -352,10 +362,10 @@ defmodule ExternalServiceTest do
       assert [
                {:ok, _},
                {:ok, _},
-               {:ok, {:error, {:fuse_blown, :"test-fuse"}}},
+               {:ok, {:error, %CircuitBreakerOpen{}}},
                {:ok, _},
                {:ok, _},
-               {:ok, {:error, {:fuse_blown, :"test-fuse"}}}
+               {:ok, {:error, %CircuitBreakerOpen{}}}
              ] = results
     end
 
@@ -370,10 +380,10 @@ defmodule ExternalServiceTest do
       assert [
                {:ok, _},
                {:ok, _},
-               {:ok, {:error, {:fuse_blown, :"test-fuse"}}},
+               {:ok, {:error, %CircuitBreakerOpen{}}},
                {:ok, _},
                {:ok, _},
-               {:ok, {:error, {:fuse_blown, :"test-fuse"}}}
+               {:ok, {:error, %CircuitBreakerOpen{}}}
              ] = results
     end
 
@@ -386,10 +396,10 @@ defmodule ExternalServiceTest do
       assert [
                {:ok, _},
                {:ok, _},
-               {:ok, {:error, {:fuse_blown, :"test-fuse"}}},
+               {:ok, {:error, %CircuitBreakerOpen{}}},
                {:ok, _},
                {:ok, _},
-               {:ok, {:error, {:fuse_blown, :"test-fuse"}}}
+               {:ok, {:error, %CircuitBreakerOpen{}}}
              ] = results
     end
   end
@@ -451,7 +461,7 @@ defmodule ExternalServiceTest do
         end)
 
       assert Process.get(:count) == 3
-      assert result == {:error, {:retries_exhausted, :reason_unknown}}
+      assert {:error, %RetriesExhausted{context: %{reason: :reason_unknown}}} = result
     end
 
     test "max_attempts of 1 makes a single attempt with no retries" do
@@ -481,6 +491,24 @@ defmodule ExternalServiceTest do
 
         assert Process.get(counter) == 3
       end
+    end
+  end
+
+  describe "structured errors" do
+    test "errors returned by call/3 are exceptions that can also be raised" do
+      {:error, error} = ExternalService.call(:not_started, fn -> :noop end)
+
+      assert %ServiceNotStarted{} = error
+      assert is_exception(error)
+      assert Exception.message(error) =~ "not been started"
+    end
+
+    test "http_status reflects the kind of failure" do
+      # Transient infrastructure failures map to 503 (Service Unavailable)...
+      assert ExternalService.RetriesExhausted.http_status(%RetriesExhausted{}) == 503
+      assert ExternalService.CircuitBreakerOpen.http_status(%CircuitBreakerOpen{}) == 503
+      # ...but a service that was never started is a programming error (500).
+      assert ExternalService.ServiceNotStarted.http_status(%ServiceNotStarted{}) == 500
     end
   end
 
