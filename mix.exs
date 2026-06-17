@@ -71,11 +71,37 @@ defmodule ExternalService.Mixfile do
 
   defp docs do
     [
-      main: "readme",
+      main: "getting-started",
       extras: [
+        "guides/getting-started.md",
+        "guides/the-front-door.md",
+        "guides/circuit-breakers.md",
+        "guides/retries.md",
+        "guides/rate-limiting.md",
+        "guides/error-handling.md",
+        "guides/telemetry.md",
+        "guides/cheatsheet.cheatmd",
+        "guides/migrating-to-2.0.md",
+        "guides/about.md",
         "README.md": [title: "Overview"],
         "CHANGELOG.md": [title: "Changelog"],
         LICENSE: [title: "License"]
+      ],
+      groups_for_extras: [
+        Guides: [
+          "guides/getting-started.md",
+          "guides/the-front-door.md",
+          "guides/circuit-breakers.md",
+          "guides/retries.md",
+          "guides/rate-limiting.md",
+          "guides/error-handling.md",
+          "guides/telemetry.md"
+        ],
+        Reference: [
+          "guides/cheatsheet.cheatmd",
+          "guides/migrating-to-2.0.md",
+          "guides/about.md"
+        ]
       ],
       filter_modules: fn _module, meta ->
         # Tag modules with `@moduledoc internal: true` to exclude them from docs.

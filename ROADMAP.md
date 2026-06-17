@@ -117,12 +117,15 @@ MyApp.Stripe.reset()
 > Circuit-breaker melt semantics intentionally unchanged: a failure still melts the
 > breaker; `:retry_on` only governs whether the attempt is retried.
 
-### M5 — Documentation overhaul
-- [ ] Split the README into `guides/` (mirror Bond): getting-started, circuit
-      breakers, retries, rate limiting, gateways, telemetry, error handling,
-      migrating-to-2.0, about/history.
-- [ ] ExDoc cheatsheets for retry/circuit-breaker recipes.
-- [ ] `mix.exs` docs config with `extras` + `filter_modules` (internal: true).
+### M5 — Documentation overhaul ✓
+- [x] Split the README into `guides/` (mirror Bond): getting-started, the module
+      front door, circuit breakers, retries, rate limiting, error handling,
+      telemetry, migrating-to-2.0, about/history. README slimmed to a 2.0-accurate
+      overview that links into the guides.
+- [x] ExDoc cheatsheet (`guides/cheatsheet.cheatmd`) for retry/circuit-breaker recipes.
+- [x] `mix.exs` docs config with `extras` + `groups_for_extras` + `filter_modules`
+      (internal: true); `main` now the Getting Started guide.
+- [x] Wrote the 1.x → 2.0 migration guide the CHANGELOG references.
 
 ### M6 — Release prep
 - [ ] CHANGELOG, migration guide, deprecation warnings on 1.x paths.
