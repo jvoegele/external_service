@@ -11,12 +11,22 @@ defmodule ExternalServiceTest do
   @fuse_name :"test-fuse"
 
   @retry_opts %RetryOptions{
-    backoff: {:linear, 0, 1}
+    backoff: :linear,
+    base: 0
+  }
+
+  # Retries raised RuntimeErrors (the new default is to NOT retry exceptions).
+  @retry_on_runtime %RetryOptions{
+    backoff: :linear,
+    base: 0,
+    retry_on: [RuntimeError]
   }
 
   @expiring_retry_options %RetryOptions{
-    backoff: {:linear, 1, 1},
-    expiry: 1
+    backoff: :linear,
+    base: 1,
+    expiry: 1,
+    retry_on: [RuntimeError]
   }
 
   describe "uninitialized fuse" do
@@ -57,7 +67,10 @@ defmodule ExternalServiceTest do
 
     setup do
       Process.put(@fuse_name, 0)
-      ExternalService.start(@fuse_name, fuse_strategy: {:standard, @fuse_retries, 10_000})
+
+      ExternalService.start(@fuse_name,
+        circuit_breaker: [tolerate: @fuse_retries, within: 10_000]
+      )
     end
 
     test "calls function once when successful" do
@@ -91,8 +104,19 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == 2
     end
 
-    test "calls function again when it raises a RuntimeError" do
-      ExternalService.call(@fuse_name, @retry_opts, fn ->
+    test "does not retry raised exceptions by default" do
+      assert_raise(RuntimeError, fn ->
+        ExternalService.call(@fuse_name, @retry_opts, fn ->
+          Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+          raise "KABOOM!"
+        end)
+      end)
+
+      assert Process.get(@fuse_name) == 1
+    end
+
+    test "calls function again when it raises an exception listed in retry_on" do
+      ExternalService.call(@fuse_name, @retry_on_runtime, fn ->
         Process.put(@fuse_name, Process.get(@fuse_name) + 1)
         raise "KABOOM!"
       end)
@@ -100,8 +124,8 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
-    test "calls function again when it raises an exception in the rescue_only list" do
-      retry_opts = %{@retry_opts | rescue_only: [ArithmeticError, ArgumentError]}
+    test "calls function again when it raises another exception type listed in retry_on" do
+      retry_opts = %{@retry_opts | retry_on: [ArithmeticError, ArgumentError]}
 
       ExternalService.call(@fuse_name, retry_opts, fn ->
         Process.put(@fuse_name, Process.get(@fuse_name) + 1)
@@ -111,8 +135,8 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
-    test "does not call function again when it raises an exception not in the rescue_only list" do
-      retry_opts = %{@retry_opts | rescue_only: [SystemLimitError, File.Error]}
+    test "does not call function again when it raises an exception not listed in retry_on" do
+      retry_opts = %{@retry_opts | retry_on: [SystemLimitError, File.Error]}
 
       assert_raise(RuntimeError, fn ->
         ExternalService.call(@fuse_name, retry_opts, fn ->
@@ -135,7 +159,7 @@ defmodule ExternalServiceTest do
 
     test "returns CircuitBreakerOpen when the fuse is blown by exceptions" do
       res =
-        ExternalService.call(@fuse_name, @retry_opts, fn ->
+        ExternalService.call(@fuse_name, @retry_on_runtime, fn ->
           raise "KABOOM!"
         end)
 
@@ -195,7 +219,7 @@ defmodule ExternalServiceTest do
       # A wide window guarantees that all 10 calls fall within a single window,
       # so the limit is reliably reached on the 6th call regardless of timing.
       ExternalService.start(fuse_name,
-        rate_limit: {5, :timer.minutes(1)},
+        rate_limit: [limit: 5, per: :timer.minutes(1)],
         sleep_function: sleep
       )
 
@@ -219,7 +243,10 @@ defmodule ExternalServiceTest do
 
     setup do
       Process.put(@fuse_name, 0)
-      ExternalService.start(@fuse_name, fuse_strategy: {:standard, @fuse_retries, 10_000})
+
+      ExternalService.start(@fuse_name,
+        circuit_breaker: [tolerate: @fuse_retries, within: 10_000]
+      )
     end
 
     test "calls function once when successful" do
@@ -257,9 +284,9 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == 2
     end
 
-    test "calls function again when it raises an exception" do
+    test "calls function again when it raises an exception listed in retry_on" do
       try do
-        ExternalService.call!(@fuse_name, @retry_opts, fn ->
+        ExternalService.call!(@fuse_name, @retry_on_runtime, fn ->
           Process.put(@fuse_name, Process.get(@fuse_name) + 1)
           raise "KABOOM!"
         end)
@@ -281,7 +308,7 @@ defmodule ExternalServiceTest do
 
     test "raises CircuitBreakerOpen when the fuse is blown by exceptions" do
       assert_raise CircuitBreakerOpen, fn ->
-        ExternalService.call!(@fuse_name, @retry_opts, fn -> raise "KABOOM!" end)
+        ExternalService.call!(@fuse_name, @retry_on_runtime, fn -> raise "KABOOM!" end)
       end
     end
 
@@ -318,7 +345,9 @@ defmodule ExternalServiceTest do
 
   describe "call_async" do
     setup do
-      ExternalService.start(@fuse_name, fuse_strategy: {:standard, @fuse_retries, 10_000})
+      ExternalService.start(@fuse_name,
+        circuit_breaker: [tolerate: @fuse_retries, within: 10_000]
+      )
     end
 
     test "returns a Task" do
@@ -329,13 +358,19 @@ defmodule ExternalServiceTest do
 
   describe "call_async_stream" do
     setup do
-      ExternalService.start(@fuse_name, fuse_strategy: {:standard, @fuse_retries, 10_000})
+      # A high failure tolerance keeps the shared fuse from blowing, so each
+      # element's result is deterministic regardless of how the stream is
+      # scheduled across processes.
+      ExternalService.start(@fuse_name, circuit_breaker: [tolerate: 100, within: 10_000])
     end
 
-    def function(:raise), do: raise("KABOOM!")
     def function(arg), do: arg
 
-    @enumerable [42, :ok, :retry, :error, {:error, :reason}, :raise]
+    # Each element is a non-retriable value, so its result passes straight
+    # through and the assertions do not depend on retry timing or fuse state.
+    @enumerable [42, :ok, {:error, :reason}, {:ok, :done}]
+    @expected [{:ok, 42}, {:ok, :ok}, {:ok, {:error, :reason}}, {:ok, {:ok, :done}}]
+    @async_opts [max_concurrency: 100, timeout: 10_000]
 
     test "with no options" do
       results =
@@ -343,14 +378,7 @@ defmodule ExternalServiceTest do
         |> ExternalService.call_async_stream(@fuse_name, &function/1)
         |> Enum.to_list()
 
-      assert [
-               {:ok, _},
-               {:ok, _},
-               {:ok, {:error, %CircuitBreakerOpen{}}},
-               {:ok, _},
-               {:ok, _},
-               {:ok, {:error, %CircuitBreakerOpen{}}}
-             ] = results
+      assert results == @expected
     end
 
     test "with retry options" do
@@ -359,17 +387,8 @@ defmodule ExternalServiceTest do
         |> ExternalService.call_async_stream(@fuse_name, @retry_opts, &function/1)
         |> Enum.to_list()
 
-      assert [
-               {:ok, _},
-               {:ok, _},
-               {:ok, {:error, %CircuitBreakerOpen{}}},
-               {:ok, _},
-               {:ok, _},
-               {:ok, {:error, %CircuitBreakerOpen{}}}
-             ] = results
+      assert results == @expected
     end
-
-    @async_opts [max_concurrency: 100, timeout: 10_000]
 
     test "with async options" do
       results =
@@ -377,14 +396,7 @@ defmodule ExternalServiceTest do
         |> ExternalService.call_async_stream(@fuse_name, @async_opts, &function/1)
         |> Enum.to_list()
 
-      assert [
-               {:ok, _},
-               {:ok, _},
-               {:ok, {:error, %CircuitBreakerOpen{}}},
-               {:ok, _},
-               {:ok, _},
-               {:ok, {:error, %CircuitBreakerOpen{}}}
-             ] = results
+      assert results == @expected
     end
 
     test "with retry and async options" do
@@ -393,14 +405,18 @@ defmodule ExternalServiceTest do
         |> ExternalService.call_async_stream(@fuse_name, @retry_opts, @async_opts, &function/1)
         |> Enum.to_list()
 
-      assert [
-               {:ok, _},
-               {:ok, _},
-               {:ok, {:error, %CircuitBreakerOpen{}}},
-               {:ok, _},
-               {:ok, _},
-               {:ok, {:error, %CircuitBreakerOpen{}}}
-             ] = results
+      assert results == @expected
+    end
+
+    test "applies retry options to each element" do
+      opts = %RetryOptions{backoff: :linear, base: 0, max_attempts: 2}
+
+      results =
+        [:retry, :ok]
+        |> ExternalService.call_async_stream(@fuse_name, opts, &function/1)
+        |> Enum.to_list()
+
+      assert [{:ok, {:error, %RetriesExhausted{}}}, {:ok, :ok}] = results
     end
   end
 
@@ -410,7 +426,7 @@ defmodule ExternalServiceTest do
 
       assert :ok = ExternalService.start(name)
       assert :fuse.ask(name, :sync) == :ok
-      assert %ExternalService.State{fuse_name: ^name} = ExternalService.State.get(name)
+      assert %ExternalService.State{service: ^name} = ExternalService.State.get(name)
 
       assert :ok = ExternalService.stop(name)
       assert :fuse.ask(name, :sync) == {:error, :not_found}
@@ -427,7 +443,11 @@ defmodule ExternalServiceTest do
     test "exercising the fuse monitor does not crash it" do
       name = :"fault-injection-test"
 
-      assert :ok = ExternalService.start(name, fuse_strategy: {:fault_injection, 0.5, 5, 1_000})
+      assert :ok =
+               ExternalService.start(name,
+                 circuit_breaker: [tolerate: 5, within: 1_000, fault_injection: 0.5]
+               )
+
       monitor = Process.whereis(:fuse_monitor)
       assert is_pid(monitor)
 
@@ -452,7 +472,7 @@ defmodule ExternalServiceTest do
     test "max_attempts limits the total number of attempts" do
       name = start_fuse(:"max-attempts-test")
       Process.put(:count, 0)
-      opts = %RetryOptions{backoff: {:linear, 0, 1}, max_attempts: 3}
+      opts = %RetryOptions{backoff: :linear, base: 0, max_attempts: 3}
 
       result =
         ExternalService.call(name, opts, fn ->
@@ -467,7 +487,7 @@ defmodule ExternalServiceTest do
     test "max_attempts of 1 makes a single attempt with no retries" do
       name = start_fuse(:"max-attempts-one")
       Process.put(:count, 0)
-      opts = %RetryOptions{backoff: {:linear, 0, 1}, max_attempts: 1}
+      opts = %RetryOptions{backoff: :linear, base: 0, max_attempts: 1}
 
       ExternalService.call(name, opts, fn ->
         Process.put(:count, Process.get(:count) + 1)
@@ -478,11 +498,11 @@ defmodule ExternalServiceTest do
     end
 
     test "jitter affects only delay, not the attempt count" do
-      for randomize <- [true, 0.5] do
-        name = start_fuse(:"jitter-test-#{inspect(randomize)}")
-        counter = {:jitter_count, randomize}
+      for jitter <- [true, 0.5] do
+        name = start_fuse(:"jitter-test-#{inspect(jitter)}")
+        counter = {:jitter_count, jitter}
         Process.put(counter, 0)
-        opts = %RetryOptions{backoff: {:linear, 0, 1}, randomize: randomize, max_attempts: 3}
+        opts = %RetryOptions{backoff: :linear, base: 0, jitter: jitter, max_attempts: 3}
 
         ExternalService.call(name, opts, fn ->
           Process.put(counter, Process.get(counter) + 1)
@@ -515,7 +535,7 @@ defmodule ExternalServiceTest do
   describe "introspection" do
     setup do
       name = :"introspection-test"
-      ExternalService.start(name, fuse_strategy: {:standard, 1, 10_000})
+      ExternalService.start(name, circuit_breaker: [tolerate: 1, within: 10_000])
       on_exit(fn -> ExternalService.stop(name) end)
       [name: name]
     end
@@ -539,7 +559,7 @@ defmodule ExternalServiceTest do
 
     test "all_available? requires every service to be available", %{name: name} do
       other = :"introspection-test-2"
-      ExternalService.start(other, fuse_strategy: {:standard, 1, 10_000})
+      ExternalService.start(other, circuit_breaker: [tolerate: 1, within: 10_000])
       on_exit(fn -> ExternalService.stop(other) end)
 
       assert ExternalService.all_available?([name, other])
@@ -601,7 +621,7 @@ defmodule ExternalServiceTest do
 
     test "emits a call exception event when the function raises a non-retriable error" do
       name = start_fuse(:"telemetry-exception")
-      retry_opts = %RetryOptions{backoff: {:linear, 0, 1}, rescue_only: [ArgumentError]}
+      retry_opts = %RetryOptions{backoff: :linear, base: 0, retry_on: [ArgumentError]}
 
       assert_raise RuntimeError, fn ->
         ExternalService.call(name, retry_opts, fn -> raise "boom" end)
@@ -612,7 +632,7 @@ defmodule ExternalServiceTest do
     end
 
     test "emits a circuit_breaker blown event when the breaker is open" do
-      name = start_fuse(:"telemetry-blown", fuse_strategy: {:standard, 1, 10_000})
+      name = start_fuse(:"telemetry-blown", circuit_breaker: [tolerate: 1, within: 10_000])
       blow_fuse(name)
       ExternalService.call(name, fn -> :ok end)
 
@@ -624,7 +644,12 @@ defmodule ExternalServiceTest do
       name = :"telemetry-rate-limit"
       bucket = ExternalService.RateLimit.bucket_name(name)
       sleep = fn _time -> ExRated.delete_bucket(bucket) end
-      ExternalService.start(name, rate_limit: {1, :timer.minutes(1)}, sleep_function: sleep)
+
+      ExternalService.start(name,
+        rate_limit: [limit: 1, per: :timer.minutes(1)],
+        sleep_function: sleep
+      )
+
       on_exit(fn -> ExternalService.stop(name) end)
 
       ExternalService.call(name, fn -> :ok end)
@@ -639,12 +664,12 @@ defmodule ExternalServiceTest do
 
   # Trips a service's circuit breaker by melting it past its configured tolerance.
   defp blow_fuse(name) do
-    ExternalService.call(name, %RetryOptions{backoff: {:linear, 0, 1}}, fn -> :retry end)
+    ExternalService.call(name, %RetryOptions{backoff: :linear, base: 0}, fn -> :retry end)
   end
 
   # Starts a service with a high failure tolerance (so it won't blow) unless
   # overridden, registers cleanup, and returns its name.
-  defp start_fuse(name, options \\ [fuse_strategy: {:standard, 100, 10_000}]) do
+  defp start_fuse(name, options \\ [circuit_breaker: [tolerate: 100, within: 10_000]]) do
     ExternalService.start(name, options)
     on_exit(fn -> ExternalService.stop(name) end)
     name

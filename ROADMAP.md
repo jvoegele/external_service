@@ -103,13 +103,19 @@ MyApp.Stripe.reset()
 > upgrade mechanical instead. Retry reasons are arbitrary terms, so they live in
 > the error `:context` (Errata's `:reason` field must be an atom).
 
-### M4 — Module front door polish
-- [ ] Redesign `use ExternalService` (supersedes/wraps `ExternalService.Gateway`):
-      unified `circuit_breaker:` / `rate_limit:` / `retry:` config, NimbleOptions
-      validated, generated `call`/`call!`/async/stream/`available?`/`reset`.
-- [ ] Rename `rescue_only` → `retry_on`; default `[]` (don't retry exceptions by
-      default) — fixes the surprise in issue #7. Map old name with a deprecation.
-- [ ] Unify terminology away from leaked "fuse" wording toward "circuit_breaker".
+### M4 — Module front door polish ✓
+- [x] `use ExternalService` (the blessed front door): unified, NimbleOptions-validated
+      `circuit_breaker:` / `rate_limit:` / `retry:` config; generated
+      `call`/`call!`/async/stream/`available?`/`blown?`/`reset`/`child_spec`/`start_link`.
+      `ExternalService.Gateway` is now a deprecated wrapper.
+- [x] `rescue_only` → `retry_on`, default `[]` (don't retry exceptions by default) — fixes #7.
+- [x] Terminology cleanup: `fuse_name` → `service`, `fuse_strategy`/`fuse_refresh` →
+      `circuit_breaker: [...]`, `reset_fuse` → `reset`, `RetryOptions` reshaped
+      (atom `backoff` + `base`/`factor`, `jitter`), NimbleOptions validation throughout.
+- [x] Services remember their default retry options (`start/2` `:retry`), used by `call/2`.
+
+> Circuit-breaker melt semantics intentionally unchanged: a failure still melts the
+> breaker; `:retry_on` only governs whether the attempt is retried.
 
 ### M5 — Documentation overhaul
 - [ ] Split the README into `guides/` (mirror Bond): getting-started, circuit

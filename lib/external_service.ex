@@ -2,6 +2,12 @@ defmodule ExternalService do
   @moduledoc """
   ExternalService handles all retry and circuit breaker logic for calls to external services.
 
+  The recommended way to use it is the declarative module-based front door,
+  `use ExternalService` (see `__using__/1`), which lets you configure a service's
+  circuit breaker, rate limiting, and default retry options in one place. The
+  functional API (`start/2`, `call/3`, and friends) is the lower-level foundation
+  it is built on, and can be used directly when you need more control.
+
   ## Telemetry
 
   `ExternalService` emits [`:telemetry`](https://hexdocs.pm/telemetry) events so
@@ -9,22 +15,22 @@ defmodule ExternalService do
   handler to any of the events below to forward them to your metrics or logging
   backend.
 
-  All events carry a `:service` key in their metadata, which is the fuse name of
-  the service the event relates to.
+  All events carry a `:service` key in their metadata, which is the name of the
+  service the event relates to.
 
     * `[:external_service, :call, :start]` - emitted when a guarded call begins.
       * Measurements: `:system_time`, `:monotonic_time`
       * Metadata: `:service`
 
     * `[:external_service, :call, :stop]` - emitted when a guarded call completes
-      (including when it returns an error tuple such as `retries_exhausted` or
-      `fuse_blown`).
+      (including when it returns an error such as `ExternalService.RetriesExhausted`
+      or `ExternalService.CircuitBreakerOpen`).
       * Measurements: `:duration`, `:monotonic_time`
       * Metadata: `:service`, `:result` (the value returned from the call)
 
     * `[:external_service, :call, :exception]` - emitted when a guarded call
-      raises (for example a non-retriable exception, or `call!/3` raising on a
-      blown fuse or exhausted retries).
+      raises (for example a non-retriable exception, or `call!/3` raising on an
+      open circuit breaker or exhausted retries).
       * Measurements: `:duration`, `:monotonic_time`
       * Metadata: `:service`, `:kind`, `:reason`, `:stacktrace`
 
@@ -56,13 +62,13 @@ defmodule ExternalService do
   require Errata
   require Logger
 
-  @typedoc "Name of a fuse"
-  @type fuse_name :: term()
+  @typedoc "A term that uniquely identifies an external service."
+  @type service :: term()
 
   @typedoc "Error returned when the allowable number of retries has been exceeded"
   @type retries_exhausted :: {:error, RetriesExhausted.t()}
 
-  @typedoc "Error returned when a service's circuit breaker is open (the fuse is blown)"
+  @typedoc "Error returned when a service's circuit breaker is open"
   @type circuit_breaker_open :: {:error, CircuitBreakerOpen.t()}
 
   @typedoc "Error returned when a service has not been started with `ExternalService.start/2`"
@@ -77,46 +83,78 @@ defmodule ExternalService do
   @type retriable_function :: (-> retriable_function_result())
 
   @typedoc """
-  Strategy controlling fuse behavior.
+  The sleep function called when a call is throttled to stay within the rate limit.
+
+  Blocking the calling process for an extended period is sometimes undesirable
+  (for example in tests), so this can be overridden. Defaults to `Process.sleep/1`.
   """
-  @type fuse_strategy ::
-          {:standard, max_melt_attempts :: pos_integer(), time_window :: pos_integer()}
-          | {:fault_injection, rate :: float(), max_melt_attempts :: pos_integer(),
-             time_window :: pos_integer()}
+  @type sleep_function :: (non_neg_integer() -> any())
 
-  @typedoc """
-  A tuple specifying rate-limiting behavior.
+  @circuit_breaker_schema [
+    tolerate: [
+      type: :pos_integer,
+      default: 10,
+      doc: "Number of failures tolerated within the `:within` window before the breaker opens."
+    ],
+    within: [
+      type: :pos_integer,
+      default: 10_000,
+      doc: "Length of the failure-counting window, in milliseconds."
+    ],
+    reset: [
+      type: :pos_integer,
+      default: 60_000,
+      doc: "Milliseconds to wait before the breaker resets (closes) after it has opened."
+    ],
+    fault_injection: [
+      type: :float,
+      doc:
+        "If set to a rate between `0.0` and `1.0`, randomly fails that fraction of calls. " <>
+          "Intended for testing how dependents behave when this service is degraded."
+    ]
+  ]
 
-  The first element of the tuple is the number of calls to allow in a given time window.
-  The second element is the time window in milliseconds.
-  """
-  @type rate_limit :: {limit :: pos_integer(), time_window :: pos_integer()}
+  @rate_limit_schema [
+    limit: [
+      type: :pos_integer,
+      required: true,
+      doc: "Maximum number of calls allowed within each `:per` window."
+    ],
+    per: [
+      type: :pos_integer,
+      required: true,
+      doc: "Length of the rate-limiting window, in milliseconds."
+    ]
+  ]
 
-  @typedoc """
-  The sleep function to be called when reaching the configured rate limit quota.
+  @start_schema [
+    circuit_breaker: [
+      type: :keyword_list,
+      default: [],
+      keys: @circuit_breaker_schema,
+      doc: "Circuit breaker configuration."
+    ],
+    rate_limit: [
+      type: :keyword_list,
+      keys: @rate_limit_schema,
+      doc: "Optional rate-limiting configuration. Omit for no rate limiting."
+    ],
+    retry: [
+      type: {:or, [:keyword_list, {:struct, RetryOptions}]},
+      default: [],
+      doc:
+        "Default retry options for the service, used by `call/2`. See " <>
+          "`ExternalService.RetryOptions` for the available keys."
+    ],
+    sleep_function: [
+      type: {:fun, 1},
+      doc:
+        "Overrides the function used to sleep while rate limited (defaults to `Process.sleep/1`)."
+    ]
+  ]
 
-  In some situations, like tests, blocking the process for an extended period of
-  time can be undesired. In these cases this function can be changed. Defaults
-  to `Process.sleep/1`.
-  """
-  @type sleep_function :: (number -> any)
-
-  @typedoc """
-  Options used for controlling circuit breaker and rate-limiting behavior.
-
-  See the [fuse docs](https://hexdocs.pm/fuse/) for further information about available fuse options.
-  """
-  @type options :: [
-          fuse_strategy: fuse_strategy(),
-          fuse_refresh: pos_integer(),
-          rate_limit: rate_limit(),
-          sleep_function: sleep_function()
-        ]
-
-  @default_fuse_options %{
-    fuse_strategy: {:standard, 10, 10_000},
-    fuse_refresh: 60_000
-  }
+  @typedoc "Options for `start/2`. See the schema documented under `start/2`."
+  @type options :: keyword()
 
   defmodule State do
     @moduledoc false
@@ -127,47 +165,75 @@ defmodule ExternalService do
     # lock-free reads with no process to message or crash. This replaces the
     # previous unsupervised `Agent`.
 
-    defstruct [:fuse_name, :fuse_options, :rate_limit]
+    defstruct [:service, :fuse_options, :rate_limit, :retry_options]
 
-    def init(fuse_name, fuse_options, rate_limit) do
+    def init(service, fuse_options, rate_limit, retry_options) do
       state = %__MODULE__{
-        fuse_name: fuse_name,
+        service: service,
         fuse_options: fuse_options,
-        rate_limit: rate_limit
+        rate_limit: rate_limit,
+        retry_options: retry_options
       }
 
-      :persistent_term.put(key(fuse_name), state)
+      :persistent_term.put(key(service), state)
       state
     end
 
-    def get(fuse_name), do: :persistent_term.get(key(fuse_name))
+    def get(service), do: :persistent_term.get(key(service))
 
-    def delete(fuse_name), do: :persistent_term.erase(key(fuse_name))
+    def fetch(service) do
+      {:ok, :persistent_term.get(key(service))}
+    rescue
+      ArgumentError -> :error
+    end
 
-    defp key(fuse_name), do: {__MODULE__, fuse_name}
+    def delete(service), do: :persistent_term.erase(key(service))
+
+    defp key(service), do: {__MODULE__, service}
   end
 
   @doc """
-  Initializes a new fuse for a specific service.
+  Initializes the circuit breaker (and optional rate limiting and default retry
+  options) for a specific service.
 
-  The `fuse_name` is a term that uniquely identifies an external service within the scope of
-  an application.
+  The `service` is a term that uniquely identifies an external service within the
+  scope of an application.
 
-  The `options` argument allows for controlling the circuit breaker behavior and rate-limiting
-  behavior when making calls to the external service. See `t:options/0` for details.
+  ## Options
+
+  #{NimbleOptions.docs(@start_schema)}
   """
-  @spec start(fuse_name(), options()) :: :ok
-  def start(fuse_name, options \\ []) do
-    fuse_opts = {
-      Keyword.get(options, :fuse_strategy, @default_fuse_options.fuse_strategy),
-      {:reset, Keyword.get(options, :fuse_refresh, @default_fuse_options.fuse_refresh)}
-    }
+  @spec start(service(), options()) :: :ok
+  def start(service, options \\ []) do
+    options = NimbleOptions.validate!(options, @start_schema)
+    circuit_breaker = options[:circuit_breaker]
 
-    :ok = Fuse.install(fuse_name, fuse_opts)
-    rate_limit = RateLimit.new(fuse_name, Keyword.get(options, :rate_limit), options)
-    State.init(fuse_name, fuse_opts, rate_limit)
+    fuse_opts = {fuse_strategy(circuit_breaker), {:reset, circuit_breaker[:reset]}}
+    :ok = Fuse.install(service, fuse_opts)
+
+    rate_limit =
+      RateLimit.new(
+        service,
+        rate_limit_spec(options[:rate_limit]),
+        Keyword.take(options, [:sleep_function])
+      )
+
+    State.init(service, fuse_opts, rate_limit, RetryOptions.new(options[:retry]))
     :ok
   end
+
+  defp fuse_strategy(circuit_breaker) do
+    tolerate = circuit_breaker[:tolerate]
+    within = circuit_breaker[:within]
+
+    case circuit_breaker[:fault_injection] do
+      nil -> {:standard, tolerate, within}
+      rate -> {:fault_injection, rate, tolerate, within}
+    end
+  end
+
+  defp rate_limit_spec(nil), do: nil
+  defp rate_limit_spec(rate_limit), do: {rate_limit[:limit], rate_limit[:per]}
 
   @doc """
   Stops the fuse for a specific service.
@@ -175,22 +241,22 @@ defmodule ExternalService do
   Stopping is idempotent: it is safe to call on a service that was never started
   or has already been stopped.
   """
-  @spec stop(fuse_name()) :: :ok
-  def stop(fuse_name) do
+  @spec stop(service()) :: :ok
+  def stop(service) do
     # `:fuse.remove/1` returns `{:error, :not_found}` for an unknown fuse; treat
     # that as success so that stop/1 is idempotent.
-    _ = Fuse.remove(fuse_name)
-    State.delete(fuse_name)
+    _ = Fuse.remove(service)
+    State.delete(service)
     :ok
   end
 
   @doc """
-  Resets the given fuse.
+  Resets the circuit breaker for the given service.
 
-  After reset, the fuse will be unbroken with no melts.
+  After reset, the breaker will be closed with no recorded failures.
   """
-  @spec reset_fuse(fuse_name()) :: :ok | {:error, :not_found}
-  def reset_fuse(fuse_name), do: Fuse.reset(fuse_name)
+  @spec reset(service()) :: :ok | {:error, :not_found}
+  def reset(service), do: Fuse.reset(service)
 
   @doc """
   Returns `true` if the service is currently available, meaning its circuit
@@ -212,8 +278,8 @@ defmodule ExternalService do
         {:error, :payments_unavailable}
       end
   """
-  @spec available?(fuse_name()) :: boolean()
-  def available?(fuse_name), do: Fuse.ask(fuse_name, :sync) == :ok
+  @spec available?(service()) :: boolean()
+  def available?(service), do: Fuse.ask(service, :sync) == :ok
 
   @doc """
   Returns `true` if the service's circuit breaker is currently blown.
@@ -222,8 +288,8 @@ defmodule ExternalService do
   use `available?/1` if you want "ready to use" semantics that also account for
   services that were never started.
   """
-  @spec blown?(fuse_name()) :: boolean()
-  def blown?(fuse_name), do: Fuse.ask(fuse_name, :sync) == :blown
+  @spec blown?(service()) :: boolean()
+  def blown?(service), do: Fuse.ask(service, :sync) == :blown
 
   @doc """
   Returns `true` only if every service in `fuse_names` is `available?/1`.
@@ -238,49 +304,76 @@ defmodule ExternalService do
         {:error, :service_unavailable}
       end
   """
-  @spec all_available?([fuse_name()]) :: boolean()
-  def all_available?(fuse_names), do: Enum.all?(fuse_names, &available?/1)
+  @spec all_available?([service()]) :: boolean()
+  def all_available?(services), do: Enum.all?(services, &available?/1)
 
   @doc """
-  Given a fuse name and retry options execute a function handling any retry and circuit breaker
-  logic.
+  Executes a function for the given service, handling retry and circuit breaker logic.
 
-  `ExternalService.start` must be run with the fuse name before using call.
+  `ExternalService.start/2` must be called for the service before using `call`.
 
   The provided function can indicate that a retry should be performed by returning the atom
-  `:retry` or a tuple of the form `{:retry, reason}`, where `reason` is any arbitrary term, or by
-  raising a `RuntimeError`. Any other result is considered successful so the operation will not be
-  retried and the result of the function will be returned as the result of `call`.
+  `:retry` or a tuple of the form `{:retry, reason}`, where `reason` is any arbitrary term. Any
+  other result is considered successful, so the operation will not be retried and the result of
+  the function will be returned as the result of `call`.
+
+  Raised exceptions are only retried if their type is listed in the `:retry_on` retry option
+  (which defaults to `[]`); otherwise they propagate to the caller.
+
+  `retry_opts` may be a `t:ExternalService.RetryOptions.t/0` struct or a keyword list of retry
+  options. When omitted (the two-argument form `call/2`), the default retry options configured for
+  the service via `start/2` are used.
   """
-  @spec call(fuse_name(), RetryOptions.t(), retriable_function()) ::
+  @spec call(service(), retriable_function()) :: error | (function_result :: any)
+  def call(service, function) when is_function(function) do
+    call(service, service_retry_options(service), function)
+  end
+
+  @spec call(service(), RetryOptions.t() | keyword(), retriable_function()) ::
           error | (function_result :: any)
-  def call(fuse_name, retry_opts \\ %RetryOptions{}, function) do
-    call_span(fuse_name, fn ->
-      case call_with_retry(fuse_name, retry_opts, function) do
+  def call(service, retry_opts, function) do
+    retry_opts = RetryOptions.new(retry_opts)
+
+    call_span(service, fn ->
+      case call_with_retry(service, retry_opts, function) do
         {:no_retry, result} -> result
-        {:error, :retry} -> {:error, retries_exhausted(fuse_name, :reason_unknown)}
-        {:error, {:retry, reason}} -> {:error, retries_exhausted(fuse_name, reason)}
-        {:error, {:fuse_blown, fuse_name}} -> {:error, circuit_breaker_open(fuse_name)}
-        {:error, {:fuse_not_found, fuse_name}} -> {:error, service_not_started(fuse_name)}
+        {:error, :retry} -> {:error, retries_exhausted(service, :reason_unknown)}
+        {:error, {:retry, reason}} -> {:error, retries_exhausted(service, reason)}
+        {:error, {:fuse_blown, service}} -> {:error, circuit_breaker_open(service)}
+        {:error, {:fuse_not_found, service}} -> {:error, service_not_started(service)}
       end
     end)
   end
 
   @doc """
-  Like `call/3`, but raises an exception if retries are exhausted or the fuse is blown.
+  Like `call/3`, but raises an exception if retries are exhausted or the circuit breaker is open.
   """
-  @spec call!(fuse_name(), RetryOptions.t(), retriable_function()) ::
+  @spec call!(service(), retriable_function()) :: function_result :: any | no_return
+  def call!(service, function) when is_function(function) do
+    call!(service, service_retry_options(service), function)
+  end
+
+  @spec call!(service(), RetryOptions.t() | keyword(), retriable_function()) ::
           function_result :: any | no_return
-  def call!(fuse_name, retry_opts \\ %RetryOptions{}, function) do
-    call_span(fuse_name, fn ->
-      case call_with_retry(fuse_name, retry_opts, function) do
+  def call!(service, retry_opts, function) do
+    retry_opts = RetryOptions.new(retry_opts)
+
+    call_span(service, fn ->
+      case call_with_retry(service, retry_opts, function) do
         {:no_retry, result} -> result
-        {:error, :retry} -> raise retries_exhausted(fuse_name, :reason_unknown)
-        {:error, {:retry, reason}} -> raise retries_exhausted(fuse_name, reason)
-        {:error, {:fuse_blown, fuse_name}} -> raise circuit_breaker_open(fuse_name)
-        {:error, {:fuse_not_found, fuse_name}} -> raise service_not_started(fuse_name)
+        {:error, :retry} -> raise retries_exhausted(service, :reason_unknown)
+        {:error, {:retry, reason}} -> raise retries_exhausted(service, reason)
+        {:error, {:fuse_blown, service}} -> raise circuit_breaker_open(service)
+        {:error, {:fuse_not_found, service}} -> raise service_not_started(service)
       end
     end)
+  end
+
+  defp service_retry_options(service) do
+    case State.fetch(service) do
+      {:ok, %{retry_options: %RetryOptions{} = retry_options}} -> retry_options
+      _ -> %RetryOptions{}
+    end
   end
 
   @doc """
@@ -288,9 +381,14 @@ defmodule ExternalService do
 
   Returns a `Task` that may be used to retrieve the result of the async call.
   """
-  @spec call_async(fuse_name(), RetryOptions.t(), retriable_function()) :: Task.t()
-  def call_async(fuse_name, retry_opts \\ %RetryOptions{}, function) do
-    Task.async(fn -> call(fuse_name, retry_opts, function) end)
+  @spec call_async(service(), retriable_function()) :: Task.t()
+  def call_async(service, function) when is_function(function) do
+    call_async(service, service_retry_options(service), function)
+  end
+
+  @spec call_async(service(), RetryOptions.t() | keyword(), retriable_function()) :: Task.t()
+  def call_async(service, retry_opts, function) do
+    Task.async(fn -> call(service, retry_opts, function) end)
   end
 
   @doc """
@@ -298,10 +396,10 @@ defmodule ExternalService do
 
   See `call_async_stream/5` for full documentation.
   """
-  @spec call_async_stream(Enumerable.t(), fuse_name(), (any() -> retriable_function_result())) ::
+  @spec call_async_stream(Enumerable.t(), service(), (any() -> retriable_function_result())) ::
           Enumerable.t()
-  def call_async_stream(enumerable, fuse_name, function) when is_function(function),
-    do: call_async_stream(enumerable, fuse_name, %RetryOptions{}, [], function)
+  def call_async_stream(enumerable, service, function) when is_function(function),
+    do: call_async_stream(enumerable, service, nil, [], function)
 
   @doc """
   Parallel, streaming version of `ExternalService.call`.
@@ -310,19 +408,19 @@ defmodule ExternalService do
   """
   @spec call_async_stream(
           Enumerable.t(),
-          fuse_name(),
+          service(),
           RetryOptions.t() | (async_opts :: list()),
           (any() -> retriable_function_result())
         ) :: Enumerable.t()
-  def call_async_stream(enumerable, fuse_name, retry_opts_or_async_opts, function)
+  def call_async_stream(enumerable, service, retry_opts_or_async_opts, function)
 
-  def call_async_stream(enumerable, fuse_name, retry_opts = %RetryOptions{}, function)
+  def call_async_stream(enumerable, service, %RetryOptions{} = retry_opts, function)
       when is_function(function),
-      do: call_async_stream(enumerable, fuse_name, retry_opts, [], function)
+      do: call_async_stream(enumerable, service, retry_opts, [], function)
 
-  def call_async_stream(enumerable, fuse_name, async_opts, function)
+  def call_async_stream(enumerable, service, async_opts, function)
       when is_list(async_opts) and is_function(function),
-      do: call_async_stream(enumerable, fuse_name, %RetryOptions{}, async_opts, function)
+      do: call_async_stream(enumerable, service, nil, async_opts, function)
 
   @doc """
   Parallel, streaming version of `ExternalService.call`.
@@ -339,36 +437,34 @@ defmodule ExternalService do
   """
   @spec call_async_stream(
           Enumerable.t(),
-          fuse_name(),
-          RetryOptions.t(),
+          service(),
+          RetryOptions.t() | keyword() | nil,
           async_opts :: list(),
           (any() -> retriable_function_result())
         ) :: Enumerable.t()
-  def call_async_stream(enumerable, fuse_name, retry_opts = %RetryOptions{}, async_opts, function)
+  def call_async_stream(enumerable, service, retry_opts, async_opts, function)
       when is_list(async_opts) and is_function(function) do
-    fun = fn item ->
-      call(fuse_name, retry_opts, fn -> function.(item) end)
-    end
-
+    retry_opts = retry_opts || service_retry_options(service)
+    fun = fn item -> call(service, retry_opts, fn -> function.(item) end) end
     Task.async_stream(enumerable, fun, async_opts)
   end
 
-  @spec call_with_retry(fuse_name(), RetryOptions.t(), retriable_function()) ::
+  @spec call_with_retry(service(), RetryOptions.t(), retriable_function()) ::
           {:no_retry, function_result :: any()}
           | {:error, :retry}
           | {:error, {:retry, reason :: any()}}
-          | {:error, {:fuse_blown, fuse_name()}}
-          | {:error, {:fuse_not_found, fuse_name()}}
-  defp call_with_retry(fuse_name, retry_opts, function) do
+          | {:error, {:fuse_blown, service()}}
+          | {:error, {:fuse_not_found, service()}}
+  defp call_with_retry(service, retry_opts, function) do
     require Retry
 
-    Retry.retry with: apply_retry_options(retry_opts), rescue_only: retry_opts.rescue_only do
-      case Fuse.ask(fuse_name, :sync) do
+    Retry.retry with: apply_retry_options(retry_opts), rescue_only: retry_opts.retry_on do
+      case Fuse.ask(service, :sync) do
         :ok ->
-          try_function(fuse_name, function)
+          try_function(service, function)
 
         :blown ->
-          emit_blown(fuse_name)
+          emit_blown(service)
           throw(:blown)
 
         {:error, :not_found} ->
@@ -383,11 +479,11 @@ defmodule ExternalService do
     end
   catch
     :blown ->
-      {:error, {:fuse_blown, fuse_name}}
+      {:error, {:fuse_blown, service}}
 
     :not_found ->
-      log_fuse_not_found(fuse_name)
-      {:error, {:fuse_not_found, fuse_name}}
+      log_service_not_started(service)
+      {:error, {:fuse_not_found, service}}
   end
 
   defp apply_retry_options(retry_opts) do
@@ -395,25 +491,25 @@ defmodule ExternalService do
 
     delay_stream =
       case retry_opts.backoff do
-        {:exponential, initial_delay} -> exponential_backoff(initial_delay)
-        {:linear, initial_delay, factor} -> linear_backoff(initial_delay, factor)
+        :exponential -> exponential_backoff(retry_opts.base)
+        :linear -> linear_backoff(retry_opts.base, retry_opts.factor)
       end
 
     delay_stream
-    |> apply_randomize(retry_opts.randomize)
+    |> apply_jitter(retry_opts.jitter)
     |> apply_if(retry_opts.cap, &cap/2)
     |> apply_if(retry_opts.expiry, &expiry/2)
     |> apply_max_attempts(retry_opts.max_attempts)
   end
 
-  # `randomize` accepts a boolean or an explicit jitter proportion. Note that
+  # `jitter` accepts a boolean or an explicit proportion. Note that
   # `Retry.DelayStreams.randomize/2` expects a number, so a bare `true` must use
   # the arity-1 default rather than being passed through.
-  defp apply_randomize(stream, proportion) when is_number(proportion),
+  defp apply_jitter(stream, proportion) when is_number(proportion),
     do: Retry.DelayStreams.randomize(stream, proportion)
 
-  defp apply_randomize(stream, true), do: Retry.DelayStreams.randomize(stream)
-  defp apply_randomize(stream, _falsy), do: stream
+  defp apply_jitter(stream, true), do: Retry.DelayStreams.randomize(stream)
+  defp apply_jitter(stream, _falsy), do: stream
 
   defp apply_if(stream, nil, _fun), do: stream
   defp apply_if(stream, value, fun), do: fun.(stream, value)
@@ -426,20 +522,20 @@ defmodule ExternalService do
        when is_integer(max_attempts) and max_attempts > 0,
        do: Stream.take(stream, max_attempts - 1)
 
-  @spec try_function(fuse_name, retriable_function) ::
+  @spec try_function(service, retriable_function) ::
           {:error, {:retry, any}} | {:error, :retry} | {:no_retry, any} | no_return
-  defp try_function(fuse_name, function) do
-    rate_limit = State.get(fuse_name).rate_limit
+  defp try_function(service, function) do
+    rate_limit = State.get(service).rate_limit
 
     case RateLimit.call(rate_limit, function) do
       {:retry, reason} ->
-        emit_retry(fuse_name, reason)
-        Fuse.melt(fuse_name)
+        emit_retry(service, reason)
+        Fuse.melt(service)
         {:error, {:retry, reason}}
 
       :retry ->
-        emit_retry(fuse_name, :reason_unknown)
-        Fuse.melt(fuse_name)
+        emit_retry(service, :reason_unknown)
+        Fuse.melt(service)
         {:error, :retry}
 
       result ->
@@ -447,56 +543,190 @@ defmodule ExternalService do
     end
   rescue
     error ->
-      emit_retry(fuse_name, error)
-      Fuse.melt(fuse_name)
+      emit_retry(service, error)
+      Fuse.melt(service)
       reraise error, __STACKTRACE__
   end
 
-  defp retries_exhausted(fuse_name, reason) do
+  defp retries_exhausted(service, reason) do
     # The retry reason can be any term, so it is carried in `:context` rather than
     # in Errata's `:reason` field (which is an atom classifier).
-    Errata.create(RetriesExhausted, context: %{service: fuse_name, reason: reason})
+    Errata.create(RetriesExhausted, context: %{service: service, reason: reason})
   end
 
-  defp circuit_breaker_open(fuse_name) do
-    Errata.create(CircuitBreakerOpen, context: %{service: fuse_name})
+  defp circuit_breaker_open(service) do
+    Errata.create(CircuitBreakerOpen, context: %{service: service})
   end
 
-  defp service_not_started(fuse_name) do
-    Errata.create(ServiceNotStarted, context: %{service: fuse_name})
+  defp service_not_started(service) do
+    Errata.create(ServiceNotStarted, context: %{service: service})
   end
 
-  defp call_span(fuse_name, fun) do
-    :telemetry.span([:external_service, :call], %{service: fuse_name}, fn ->
+  defp call_span(service, fun) do
+    :telemetry.span([:external_service, :call], %{service: service}, fn ->
       result = fun.()
-      {result, %{service: fuse_name, result: result}}
+      {result, %{service: service, result: result}}
     end)
   end
 
-  defp emit_retry(fuse_name, reason) do
+  defp emit_retry(service, reason) do
     :telemetry.execute(
       [:external_service, :call, :retry],
       %{count: 1},
-      %{service: fuse_name, reason: reason}
+      %{service: service, reason: reason}
     )
   end
 
-  defp emit_blown(fuse_name) do
+  defp emit_blown(service) do
     :telemetry.execute(
       [:external_service, :circuit_breaker, :blown],
       %{count: 1},
-      %{service: fuse_name}
+      %{service: service}
     )
   end
 
-  defp log_fuse_not_found(fuse_name) do
-    Logger.error(fuse_not_found_message(fuse_name))
+  defp log_service_not_started(service) do
+    Logger.error(service_not_started_message(service))
   end
 
-  defp fuse_not_found_message(fuse_name) do
-    fuse_name = inspect(fuse_name)
+  defp service_not_started_message(service) do
+    service = inspect(service)
 
-    "Fuse :#{fuse_name} not found. To initialize this fuse, call " <>
-      "ExternalService.start(:#{fuse_name}) in your application start code."
+    "Service #{service} has not been started. To initialize it, call " <>
+      "ExternalService.start(#{service}) in your application start code."
+  end
+
+  @doc """
+  Defines a module-based gateway to an external service.
+
+  `use ExternalService` generates a small, declarative wrapper around the
+  functional API. Configure the circuit breaker, rate limiting, and default
+  retry options at the module level, then start the module under a supervisor
+  and call the service through the generated `call/1` (and friends).
+
+  ## Example
+
+      defmodule MyApp.Stripe do
+        use ExternalService,
+          circuit_breaker: [tolerate: 5, within: :timer.seconds(1), reset: :timer.seconds(5)],
+          rate_limit: [limit: 100, per: :timer.seconds(1)],
+          retry: [max_attempts: 5, backoff: :exponential, jitter: true]
+
+        def charge(params) do
+          call fn ->
+            case Stripe.charge(params) do
+              {:ok, result} -> {:ok, result}
+              {:error, %{status: status}} when status in 500..599 -> :retry
+              other -> other
+            end
+          end
+        end
+      end
+
+  Start it under your supervision tree:
+
+      children = [MyApp.Stripe]
+      Supervisor.start_link(children, strategy: :one_for_one)
+
+  Configuration can be overridden when starting (useful in tests), and is deep
+  merged with the options given to `use`:
+
+      {MyApp.Stripe, circuit_breaker: [tolerate: 1], retry: [max_attempts: 1]}
+
+  ## Options
+
+  Accepts the same options as `start/2` (`:circuit_breaker`, `:rate_limit`,
+  `:retry`, `:sleep_function`), plus:
+
+    * `:name` - the term that identifies the service. Defaults to the module name.
+
+  ## Generated functions
+
+    * `call/1`, `call/2`, `call!/1`, `call!/2`
+    * `call_async/1`, `call_async/2`
+    * `call_async_stream/2`, `call_async_stream/3`, `call_async_stream/4`
+    * `available?/0`, `blown?/0`, `reset/0`
+    * `child_spec/1`, `start_link/1`
+  """
+  defmacro __using__(opts) do
+    quote bind_quoted: [opts: opts] do
+      @__external_service__ Keyword.get(opts, :name, __MODULE__)
+      @__external_service_opts__ Keyword.delete(opts, :name)
+
+      @doc false
+      def child_spec(overrides \\ []) do
+        %{id: __MODULE__, type: :worker, start: {__MODULE__, :start_link, [overrides]}}
+      end
+
+      @doc """
+      Starts the service (installing its circuit breaker and rate limiter) linked
+      to the current process.
+
+      `overrides` are deep merged with the options given to `use ExternalService`.
+      """
+      def start_link(overrides \\ []) do
+        config = DeepMerge.deep_merge(@__external_service_opts__, overrides)
+
+        Agent.start_link(
+          fn -> :ok = ExternalService.start(@__external_service__, config) end,
+          name: Module.concat(__MODULE__, "Starter")
+        )
+      end
+
+      @doc "Executes `function` for this service. See `ExternalService.call/3`."
+      def call(function) when is_function(function),
+        do: ExternalService.call(@__external_service__, function)
+
+      def call(retry_opts, function),
+        do: ExternalService.call(@__external_service__, retry_opts, function)
+
+      @doc "Like `call/2`, but raises on failure. See `ExternalService.call!/3`."
+      def call!(function) when is_function(function),
+        do: ExternalService.call!(@__external_service__, function)
+
+      def call!(retry_opts, function),
+        do: ExternalService.call!(@__external_service__, retry_opts, function)
+
+      @doc "Asynchronous version of `call/2`. See `ExternalService.call_async/3`."
+      def call_async(function) when is_function(function),
+        do: ExternalService.call_async(@__external_service__, function)
+
+      def call_async(retry_opts, function),
+        do: ExternalService.call_async(@__external_service__, retry_opts, function)
+
+      @doc "Parallel, streaming version of `call/2`. See `ExternalService.call_async_stream/5`."
+      def call_async_stream(enumerable, function) when is_function(function),
+        do: ExternalService.call_async_stream(enumerable, @__external_service__, function)
+
+      @doc "See `call_async_stream/2`."
+      def call_async_stream(enumerable, retry_opts_or_async_opts, function),
+        do:
+          ExternalService.call_async_stream(
+            enumerable,
+            @__external_service__,
+            retry_opts_or_async_opts,
+            function
+          )
+
+      @doc "See `call_async_stream/2`."
+      def call_async_stream(enumerable, retry_opts, async_opts, function),
+        do:
+          ExternalService.call_async_stream(
+            enumerable,
+            @__external_service__,
+            retry_opts,
+            async_opts,
+            function
+          )
+
+      @doc "Returns `true` if the service is available. See `ExternalService.available?/1`."
+      def available?, do: ExternalService.available?(@__external_service__)
+
+      @doc "Returns `true` if the circuit breaker is open. See `ExternalService.blown?/1`."
+      def blown?, do: ExternalService.blown?(@__external_service__)
+
+      @doc "Resets the circuit breaker. See `ExternalService.reset/1`."
+      def reset, do: ExternalService.reset(@__external_service__)
+    end
   end
 end
