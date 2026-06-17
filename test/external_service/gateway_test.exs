@@ -21,6 +21,11 @@ defmodule ExternalService.GatewayTest do
     end
   end
 
+  defmodule ConfiguredGateway do
+    use ExternalService.Gateway,
+      fuse: [name: :configured_gateway_fuse, strategy: {:standard, 3, 7_000}, refresh: 4_321]
+  end
+
   describe "child_spec" do
     test "generates a child spec for starting under a supervisor" do
       assert %{id: TestGateway, type: :worker, start: start_tuple} =
@@ -90,5 +95,30 @@ defmodule ExternalService.GatewayTest do
       Process.sleep(50)
       assert TestGateway.gateway_config()[:rate_limit] == {9, 999}
     end
+  end
+
+  describe "fuse configuration (regression for gateway fuse-config drop)" do
+    test "applies the gateway's configured fuse strategy and refresh" do
+      {:ok, _pid} = ConfiguredGateway.start_link([])
+
+      fuse = installed_fuse(:configured_gateway_fuse)
+
+      # The fuse server stores each fuse as the record
+      # {:fuse, name, intensity, period, heal_time, ...} (fuse 2.5). Previously
+      # the gateway's strategy/refresh were dropped and every gateway installed
+      # the default {:standard, 10, 10_000}/60_000 fuse.
+      assert elem(fuse, 2) == 3, "expected configured intensity (max melts), got #{inspect(fuse)}"
+      assert elem(fuse, 4) == 4_321, "expected configured refresh, got #{inspect(fuse)}"
+    end
+  end
+
+  # Reads the installed fuse record straight out of the :fuse_server state. This
+  # is the only way to assert on the circuit-breaker config that was actually
+  # installed (fuse exposes no public accessor for it).
+  defp installed_fuse(name) do
+    :fuse_server
+    |> :sys.get_state()
+    |> elem(1)
+    |> Enum.find(fn fuse -> elem(fuse, 1) == name end)
   end
 end

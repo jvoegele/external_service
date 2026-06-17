@@ -10,11 +10,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Work toward 2.0 (see `ROADMAP.md`). The 2.0 line modernizes the project and
 introduces breaking changes; a migration guide will accompany the release.
 
+### Fixed
+- `ExternalService.Gateway` now applies the `fuse: [strategy:, refresh:]` options
+  it was configured with. Previously these keys did not match the
+  `:fuse_strategy`/`:fuse_refresh` keys that `ExternalService.start/2` reads, so
+  every gateway silently ran on the default circuit-breaker configuration.
+- Added a regression test for the `:fault_injection` strategy (issue #4); the
+  `:fuse_monitor` crash no longer reproduces on fuse 2.5.
+
 ### Changed
 - Raise the minimum Elixir requirement to `~> 1.15`.
 - Modernize the build: refreshed dependency versions, added `nimble_options` and
   `telemetry`, ExDoc/Dialyxir bumps, GitHub Actions CI (test matrix, quality, and
   Dialyzer jobs), and Hex package/docs metadata cleanup.
+- Store per-service state in `:persistent_term` instead of an unsupervised
+  `Agent`, removing a process that could crash and was never linked to a
+  supervisor. `ExternalService.stop/1` now accepts any term as a fuse name
+  (matching `start/2`), not only atoms, and is idempotent — it is safe to call
+  on a service that was never started or has already been stopped.
 
 ## 1.1.4 - 2024-01-04
 ### Fixed

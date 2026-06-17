@@ -98,6 +98,12 @@ defmodule ExternalService do
   defmodule State do
     @moduledoc false
 
+    # Per-service configuration is stored in `:persistent_term`. The state for a
+    # service is written once by `ExternalService.start/2` and read on every call,
+    # which is exactly the access pattern `:persistent_term` is optimized for:
+    # lock-free reads with no process to message or crash. This replaces the
+    # previous unsupervised `Agent`.
+
     defstruct [:fuse_name, :fuse_options, :rate_limit]
 
     def init(fuse_name, fuse_options, rate_limit) do
@@ -107,13 +113,15 @@ defmodule ExternalService do
         rate_limit: rate_limit
       }
 
-      Agent.start(fn -> state end, name: registered_name(fuse_name))
+      :persistent_term.put(key(fuse_name), state)
       state
     end
 
-    def get(fuse_name), do: Agent.get(registered_name(fuse_name), & &1)
+    def get(fuse_name), do: :persistent_term.get(key(fuse_name))
 
-    def registered_name(fuse_name), do: Module.concat(fuse_name, __MODULE__)
+    def delete(fuse_name), do: :persistent_term.erase(key(fuse_name))
+
+    defp key(fuse_name), do: {__MODULE__, fuse_name}
   end
 
   @doc """
@@ -140,11 +148,16 @@ defmodule ExternalService do
 
   @doc """
   Stops the fuse for a specific service.
+
+  Stopping is idempotent: it is safe to call on a service that was never started
+  or has already been stopped.
   """
   @spec stop(fuse_name()) :: :ok
-  def stop(fuse_name) when is_atom(fuse_name) do
-    :ok = Fuse.remove(fuse_name)
-    :ok = State.registered_name(fuse_name) |> Agent.stop()
+  def stop(fuse_name) do
+    # `:fuse.remove/1` returns `{:error, :not_found}` for an unknown fuse; treat
+    # that as success so that stop/1 is idempotent.
+    _ = Fuse.remove(fuse_name)
+    State.delete(fuse_name)
     :ok
   end
 

@@ -260,7 +260,7 @@ defmodule ExternalService.Gateway do
       when is_list(module_opts) and is_list(start_opts) do
     config = DeepMerge.deep_merge(module_opts, start_opts)
     {fuse_name, fuse_opts} = config |> Keyword.get(:fuse, []) |> Keyword.pop(:name, module)
-    service_start_opts = Keyword.merge(fuse_opts, Keyword.take(config, [:rate_limit]))
+    service_start_opts = service_start_opts(fuse_opts, config)
     :ok = ExternalService.start(fuse_name, service_start_opts)
 
     Agent.start_link(
@@ -271,6 +271,21 @@ defmodule ExternalService.Gateway do
 
   @doc false
   def get_config(module), do: Agent.get(config_agent(module), & &1)
+
+  # Translate the gateway's `fuse: [strategy:, refresh:]` options into the
+  # `:fuse_strategy`/`:fuse_refresh` keys that `ExternalService.start/2` expects.
+  # Without this translation the keys never match and every gateway silently runs
+  # on the default fuse configuration.
+  @fuse_key_map [strategy: :fuse_strategy, refresh: :fuse_refresh]
+
+  defp service_start_opts(fuse_opts, config) do
+    fuse_start_opts =
+      for {gateway_key, start_key} <- @fuse_key_map, Keyword.has_key?(fuse_opts, gateway_key) do
+        {start_key, Keyword.fetch!(fuse_opts, gateway_key)}
+      end
+
+    Keyword.merge(fuse_start_opts, Keyword.take(config, [:rate_limit]))
+  end
 
   defp config_agent(module), do: Module.concat(module, Config)
 end

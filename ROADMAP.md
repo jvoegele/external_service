@@ -66,11 +66,22 @@ MyApp.Stripe.reset()
 - [ ] CI workflow + formatter/credo/dialyzer clean (mirror the Errata setup).
 
 ### M1 — Internal refactor (no public break)
-- [ ] Replace the unsupervised `Agent` state (and Gateway `Config` Agent) with
+- [ ] Replace the unsupervised `Agent` state in `ExternalService.start/2` with
       `:persistent_term` — fast reads, nothing to crash. Resolves the resilience
-      items in TODO.md.
-- [ ] Extract all option schemas into NimbleOptions schemas (validation + docs).
-- [ ] Fix `:fault_injection` strategy (issue #4).
+      items in TODO.md. (Gateway's supervised `Config` Agent is left for the M4
+      front-door redesign, where its storage and lifecycle change together.)
+- [ ] **Fix the Gateway fuse-config drop**: `use ExternalService.Gateway` accepts
+      `fuse: [strategy:, refresh:]` but `ExternalService.start/2` reads
+      `:fuse_strategy`/`:fuse_refresh`, so gateway circuit-breaker settings were
+      silently ignored and every gateway ran on default fuse config. Translate the
+      keys + add a regression test asserting on the installed fuse record.
+- [ ] Add a regression test for the `:fault_injection` strategy (issue #4). The
+      `FunctionClauseError` in `:fuse_monitor` no longer reproduces on fuse 2.5 —
+      the dependency upgrade fixed it — so this just locks the behavior in.
+
+> NimbleOptions schema extraction moved to **M4**: the public option *shape*
+> changes there (`circuit_breaker:`/`rate_limit:`/`retry:`), so validating the
+> current, soon-to-be-replaced shape would be throwaway work.
 
 ### M2 — New capabilities (additive)
 - [ ] Introspection: `available?/1`, `blown?/1`, `all_available?/1` + module-level
