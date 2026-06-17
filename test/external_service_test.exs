@@ -393,4 +393,48 @@ defmodule ExternalServiceTest do
              ] = results
     end
   end
+
+  describe "start/stop lifecycle" do
+    test "stop removes both the fuse and the persisted state" do
+      name = :"lifecycle-test"
+
+      assert :ok = ExternalService.start(name)
+      assert :fuse.ask(name, :sync) == :ok
+      assert %ExternalService.State{fuse_name: ^name} = ExternalService.State.get(name)
+
+      assert :ok = ExternalService.stop(name)
+      assert :fuse.ask(name, :sync) == {:error, :not_found}
+      # State is stored in :persistent_term, which raises when the key is absent.
+      assert_raise ArgumentError, fn -> ExternalService.State.get(name) end
+    end
+
+    test "stop is idempotent and safe on a service that was never started" do
+      assert :ok = ExternalService.stop(:"never-started-service")
+    end
+  end
+
+  describe "fault_injection strategy (regression for #4)" do
+    test "exercising the fuse monitor does not crash it" do
+      name = :"fault-injection-test"
+
+      assert :ok = ExternalService.start(name, fuse_strategy: {:fault_injection, 0.5, 5, 1_000})
+      monitor = Process.whereis(:fuse_monitor)
+      assert is_pid(monitor)
+
+      for _ <- 1..20 do
+        ExternalService.call(name, @expiring_retry_options, fn -> :ok end)
+      end
+
+      # Force the periodic bookkeeping that historically raised a
+      # FunctionClauseError in :fuse_monitor.update/2 for gradual (fault
+      # injection) fuses. fuse 2.5 fixed this; the synchronous sync/0 call below
+      # is serialized after the :timeout message, so it only returns once the
+      # monitor has processed it — if the monitor had crashed, this would exit.
+      send(:fuse_monitor, :timeout)
+      assert :fuse_monitor.sync() == :ok
+      assert Process.whereis(:fuse_monitor) == monitor
+
+      ExternalService.stop(name)
+    end
+  end
 end
