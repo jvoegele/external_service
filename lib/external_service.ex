@@ -170,6 +170,55 @@ defmodule ExternalService do
   def reset_fuse(fuse_name), do: Fuse.reset(fuse_name)
 
   @doc """
+  Returns `true` if the service is currently available, meaning its circuit
+  breaker is not blown.
+
+  This is useful for the circuit breaker pattern: before kicking off expensive
+  work, you can check whether the services it depends on are available and bail
+  out early (returning a degraded response) if any of them are not.
+
+  A service that has not been started (see `start/2`) is reported as not
+  available. Note that availability can change between this check and a
+  subsequent `call/3`, so this is a best-effort signal, not a guarantee.
+
+  ## Examples
+
+      if ExternalService.available?(:payments) do
+        charge(order)
+      else
+        {:error, :payments_unavailable}
+      end
+  """
+  @spec available?(fuse_name()) :: boolean()
+  def available?(fuse_name), do: Fuse.ask(fuse_name, :sync) == :ok
+
+  @doc """
+  Returns `true` if the service's circuit breaker is currently blown.
+
+  A service that has not been started (see `start/2`) is _not_ considered blown;
+  use `available?/1` if you want "ready to use" semantics that also account for
+  services that were never started.
+  """
+  @spec blown?(fuse_name()) :: boolean()
+  def blown?(fuse_name), do: Fuse.ask(fuse_name, :sync) == :blown
+
+  @doc """
+  Returns `true` only if every service in `fuse_names` is `available?/1`.
+
+  Useful for guarding work that depends on several services at once.
+
+  ## Examples
+
+      if ExternalService.all_available?([:payments, :inventory]) do
+        place_order(order)
+      else
+        {:error, :service_unavailable}
+      end
+  """
+  @spec all_available?([fuse_name()]) :: boolean()
+  def all_available?(fuse_names), do: Enum.all?(fuse_names, &available?/1)
+
+  @doc """
   Given a fuse name and retry options execute a function handling any retry and circuit breaker
   logic.
 

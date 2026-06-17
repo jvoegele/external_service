@@ -26,6 +26,12 @@ defmodule ExternalService.GatewayTest do
       fuse: [name: :configured_gateway_fuse, strategy: {:standard, 3, 7_000}, refresh: 4_321]
   end
 
+  defmodule IntrospectionGateway do
+    use ExternalService.Gateway,
+      fuse: [name: :introspection_gateway_fuse, strategy: {:standard, 1, 10_000}],
+      retry: [backoff: {:linear, 0, 1}]
+  end
+
   describe "child_spec" do
     test "generates a child spec for starting under a supervisor" do
       assert %{id: TestGateway, type: :worker, start: start_tuple} =
@@ -109,6 +115,21 @@ defmodule ExternalService.GatewayTest do
       # the default {:standard, 10, 10_000}/60_000 fuse.
       assert elem(fuse, 2) == 3, "expected configured intensity (max melts), got #{inspect(fuse)}"
       assert elem(fuse, 4) == 4_321, "expected configured refresh, got #{inspect(fuse)}"
+    end
+  end
+
+  describe "introspection" do
+    test "available?/blown? reflect the gateway's circuit breaker state" do
+      {:ok, _pid} = IntrospectionGateway.start_link([])
+
+      assert IntrospectionGateway.available?()
+      refute IntrospectionGateway.blown?()
+
+      # Drive the fuse past its tolerance of 1 melt so the breaker trips.
+      IntrospectionGateway.external_call(fn -> :retry end)
+
+      assert IntrospectionGateway.blown?()
+      refute IntrospectionGateway.available?()
     end
   end
 

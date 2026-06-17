@@ -437,4 +437,46 @@ defmodule ExternalServiceTest do
       ExternalService.stop(name)
     end
   end
+
+  describe "introspection" do
+    setup do
+      name = :"introspection-test"
+      ExternalService.start(name, fuse_strategy: {:standard, 1, 10_000})
+      on_exit(fn -> ExternalService.stop(name) end)
+      [name: name]
+    end
+
+    test "available?/blown? for a freshly started service", %{name: name} do
+      assert ExternalService.available?(name)
+      refute ExternalService.blown?(name)
+    end
+
+    test "available?/blown? once the breaker is blown", %{name: name} do
+      blow_fuse(name)
+
+      assert ExternalService.blown?(name)
+      refute ExternalService.available?(name)
+    end
+
+    test "a service that was never started is neither available nor blown" do
+      refute ExternalService.available?(:"never-started-service")
+      refute ExternalService.blown?(:"never-started-service")
+    end
+
+    test "all_available? requires every service to be available", %{name: name} do
+      other = :"introspection-test-2"
+      ExternalService.start(other, fuse_strategy: {:standard, 1, 10_000})
+      on_exit(fn -> ExternalService.stop(other) end)
+
+      assert ExternalService.all_available?([name, other])
+
+      blow_fuse(other)
+      refute ExternalService.all_available?([name, other])
+    end
+  end
+
+  # Trips a service's circuit breaker by melting it past its configured tolerance.
+  defp blow_fuse(name) do
+    ExternalService.call(name, %RetryOptions{backoff: {:linear, 0, 1}}, fn -> :retry end)
+  end
 end

@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Work toward 2.0 (see `ROADMAP.md`). The 2.0 line modernizes the project and
 introduces breaking changes; a migration guide will accompany the release.
 
+### Added
+- Introspection for circuit breaker state ([issue #5](https://github.com/jvoegele/external_service/issues/5)):
+  `ExternalService.available?/1`, `ExternalService.blown?/1`, and
+  `ExternalService.all_available?/1`, plus `available?/0` and `blown?/0` on
+  modules using `ExternalService.Gateway`.
+
 ### Fixed
 - `ExternalService.Gateway` now applies the `fuse: [strategy:, refresh:]` options
   it was configured with. Previously these keys did not match the

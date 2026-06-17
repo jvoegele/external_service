@@ -157,6 +157,20 @@ defmodule ExternalService.Gateway do
             ) ::
               Enumerable.t()
 
+  @doc """
+  Returns `true` if the gateway's service is currently available.
+
+  See `ExternalService.available?/1` for more information.
+  """
+  @callback available?() :: boolean()
+
+  @doc """
+  Returns `true` if the gateway's circuit breaker is currently blown.
+
+  See `ExternalService.blown?/1` for more information.
+  """
+  @callback blown?() :: boolean()
+
   defmacro __using__(opts) do
     quote do
       @behaviour ExternalService.Gateway
@@ -188,6 +202,12 @@ defmodule ExternalService.Gateway do
         config = get_config()
         ExternalService.reset_fuse(fuse_name(config))
       end
+
+      @impl ExternalService.Gateway
+      def available?, do: ExternalService.available?(fuse_name(get_config()))
+
+      @impl ExternalService.Gateway
+      def blown?, do: ExternalService.blown?(fuse_name(get_config()))
 
       @doc """
       Returns the configuration with which the gateway was started.
