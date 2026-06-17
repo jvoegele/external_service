@@ -46,26 +46,30 @@ defmodule ExternalService do
       * Metadata: `:service`
   """
 
+  alias ExternalService.CircuitBreakerOpen
   alias ExternalService.RateLimit
+  alias ExternalService.RetriesExhausted
   alias ExternalService.RetryOptions
+  alias ExternalService.ServiceNotStarted
   alias :fuse, as: Fuse
 
+  require Errata
   require Logger
 
   @typedoc "Name of a fuse"
   @type fuse_name :: term()
 
-  @typedoc "Error tuple returned when the allowable number of retries has been exceeded"
-  @type retries_exhausted :: {:error, {:retries_exhausted, reason :: any}}
+  @typedoc "Error returned when the allowable number of retries has been exceeded"
+  @type retries_exhausted :: {:error, RetriesExhausted.t()}
 
-  @typedoc "Error tuple returned when a fuse has been melted enough times that the fuse is blown"
-  @type fuse_blown :: {:error, {:fuse_blown, fuse_name}}
+  @typedoc "Error returned when a service's circuit breaker is open (the fuse is blown)"
+  @type circuit_breaker_open :: {:error, CircuitBreakerOpen.t()}
 
-  @typedoc "Error tuple returned when a fuse has not been initialized with `ExternalService.start/1`"
-  @type fuse_not_found :: {:error, {:fuse_not_found, fuse_name}}
+  @typedoc "Error returned when a service has not been started with `ExternalService.start/2`"
+  @type service_not_started :: {:error, ServiceNotStarted.t()}
 
-  @typedoc "Union type representing all the possible error tuple return values"
-  @type error :: retries_exhausted | fuse_blown | fuse_not_found
+  @typedoc "Union type representing all the possible error return values"
+  @type error :: retries_exhausted | circuit_breaker_open | service_not_started
 
   @type retriable_function_result ::
           :retry | {:retry, reason :: any()} | (function_result :: any())
@@ -113,30 +117,6 @@ defmodule ExternalService do
     fuse_strategy: {:standard, 10, 10_000},
     fuse_refresh: 60_000
   }
-
-  defmodule RetriesExhaustedError do
-    @moduledoc """
-    Exception raised by `ExternalService.call!/3` when the allowable number of retries has been
-    exceeded.
-    """
-    defexception [:message]
-  end
-
-  defmodule FuseBlownError do
-    @moduledoc """
-    Exception raised by `ExternalService.call!/3` when a fuse has been melted enough times that
-    the fuse is blown.
-    """
-    defexception [:message]
-  end
-
-  defmodule FuseNotFoundError do
-    @moduledoc """
-    Exception raised by `ExternalService.call!/3` when a fuse has not been initialized with
-    `ExternalService.start/1`.
-    """
-    defexception [:message]
-  end
 
   defmodule State do
     @moduledoc false
@@ -278,9 +258,10 @@ defmodule ExternalService do
     call_span(fuse_name, fn ->
       case call_with_retry(fuse_name, retry_opts, function) do
         {:no_retry, result} -> result
-        {:error, :retry} -> {:error, {:retries_exhausted, :reason_unknown}}
-        {:error, {:retry, reason}} -> {:error, {:retries_exhausted, reason}}
-        result -> result
+        {:error, :retry} -> {:error, retries_exhausted(fuse_name, :reason_unknown)}
+        {:error, {:retry, reason}} -> {:error, retries_exhausted(fuse_name, reason)}
+        {:error, {:fuse_blown, fuse_name}} -> {:error, circuit_breaker_open(fuse_name)}
+        {:error, {:fuse_not_found, fuse_name}} -> {:error, service_not_started(fuse_name)}
       end
     end)
   end
@@ -293,21 +274,11 @@ defmodule ExternalService do
   def call!(fuse_name, retry_opts \\ %RetryOptions{}, function) do
     call_span(fuse_name, fn ->
       case call_with_retry(fuse_name, retry_opts, function) do
-        {:no_retry, result} ->
-          result
-
-        {:error, :retry} ->
-          raise ExternalService.RetriesExhaustedError, message: "fuse_name: #{fuse_name}"
-
-        {:error, {:retry, reason}} ->
-          raise ExternalService.RetriesExhaustedError,
-            message: "reason: #{inspect(reason)}, fuse_name: #{fuse_name}"
-
-        {:error, {:fuse_blown, fuse_name}} ->
-          raise ExternalService.FuseBlownError, message: inspect(fuse_name)
-
-        {:error, {:fuse_not_found, fuse_name}} ->
-          raise ExternalService.FuseNotFoundError, message: fuse_not_found_message(fuse_name)
+        {:no_retry, result} -> result
+        {:error, :retry} -> raise retries_exhausted(fuse_name, :reason_unknown)
+        {:error, {:retry, reason}} -> raise retries_exhausted(fuse_name, reason)
+        {:error, {:fuse_blown, fuse_name}} -> raise circuit_breaker_open(fuse_name)
+        {:error, {:fuse_not_found, fuse_name}} -> raise service_not_started(fuse_name)
       end
     end)
   end
@@ -386,9 +357,8 @@ defmodule ExternalService do
           {:no_retry, function_result :: any()}
           | {:error, :retry}
           | {:error, {:retry, reason :: any()}}
-          | fuse_blown
-          | fuse_not_found
-          | (function_result :: any())
+          | {:error, {:fuse_blown, fuse_name()}}
+          | {:error, {:fuse_not_found, fuse_name()}}
   defp call_with_retry(fuse_name, retry_opts, function) do
     require Retry
 
@@ -480,6 +450,20 @@ defmodule ExternalService do
       emit_retry(fuse_name, error)
       Fuse.melt(fuse_name)
       reraise error, __STACKTRACE__
+  end
+
+  defp retries_exhausted(fuse_name, reason) do
+    # The retry reason can be any term, so it is carried in `:context` rather than
+    # in Errata's `:reason` field (which is an atom classifier).
+    Errata.create(RetriesExhausted, context: %{service: fuse_name, reason: reason})
+  end
+
+  defp circuit_breaker_open(fuse_name) do
+    Errata.create(CircuitBreakerOpen, context: %{service: fuse_name})
+  end
+
+  defp service_not_started(fuse_name) do
+    Errata.create(ServiceNotStarted, context: %{service: fuse_name})
   end
 
   defp call_span(fuse_name, fun) do

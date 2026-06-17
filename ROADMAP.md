@@ -91,11 +91,17 @@ MyApp.Stripe.reset()
       `[:external_service, :circuit, :blown|:reset]`.
 - [ ] Count-based retries (`max_attempts`) and explicit `jitter`.
 
-### M3 — Structured errors (Errata)
-- [ ] Define `ExternalService.RetriesExhausted`, `ExternalService.CircuitBlown`,
+### M3 — Structured errors (Errata) ✓
+- [x] Define `ExternalService.RetriesExhausted`, `ExternalService.CircuitBreakerOpen`,
       `ExternalService.ServiceNotStarted` as `Errata.InfrastructureError`.
-- [ ] `call!` raises them; `call` returns `{:error, %Struct{}}`.
-- [ ] Compatibility shim + migration notes for the old nested tuples.
+- [x] `call!` raises them; `call` returns `{:error, %Struct{}}`.
+- [x] Migration notes for the old nested tuples (CHANGELOG table).
+
+> No runtime compatibility shim: 2.0 is a clean break with a documented mapping.
+> A `legacy_errors: true`-style flag would entrench the tuple shape we are
+> deliberately replacing; the migration table + structured structs make the
+> upgrade mechanical instead. Retry reasons are arbitrary terms, so they live in
+> the error `:context` (Errata's `:reason` field must be an atom).
 
 ### M4 — Module front door polish
 - [ ] Redesign `use ExternalService` (supersedes/wraps `ExternalService.Gateway`):

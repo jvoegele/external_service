@@ -24,6 +24,34 @@ introduces breaking changes; a migration guide will accompany the release.
   retries), complementing the existing time-based `:expiry`.
 - `RetryOptions.randomize` now also accepts a float jitter proportion (e.g.
   `0.25` for +/- 25%) in addition to `true`/`false`.
+- Structured error types (built on [Errata](https://hexdocs.pm/errata)):
+  `ExternalService.RetriesExhausted`, `ExternalService.CircuitBreakerOpen`, and
+  `ExternalService.ServiceNotStarted`. Each is an exception struct carrying a
+  `:context` (always including the `:service`), an `http_status/1`, and JSON
+  encoding, so the same value can be returned from `call/3` or raised by
+  `call!/3`.
+
+### Changed (breaking)
+- **Error representation overhauled.** `call/3` now returns structured error
+  structs instead of nested tuples, and `call!/3` raises the same structs:
+
+  | Before (1.x) | After (2.0) |
+  | --- | --- |
+  | `{:error, {:retries_exhausted, reason}}` | `{:error, %ExternalService.RetriesExhausted{context: %{service: name, reason: reason}}}` |
+  | `{:error, {:fuse_blown, name}}` | `{:error, %ExternalService.CircuitBreakerOpen{context: %{service: name}}}` |
+  | `{:error, {:fuse_not_found, name}}` | `{:error, %ExternalService.ServiceNotStarted{context: %{service: name}}}` |
+  | raise `ExternalService.RetriesExhaustedError` | raise `ExternalService.RetriesExhausted` |
+  | raise `ExternalService.FuseBlownError` | raise `ExternalService.CircuitBreakerOpen` |
+  | raise `ExternalService.FuseNotFoundError` | raise `ExternalService.ServiceNotStarted` |
+
+  Results returned directly by the wrapped function (including its own
+  `{:error, reason}` values) are unchanged. A full migration guide will ship with
+  2.0.
+
+### Removed (breaking)
+- The `ExternalService.RetriesExhaustedError`, `ExternalService.FuseBlownError`,
+  and `ExternalService.FuseNotFoundError` exception modules, replaced by the
+  structured error types above.
 
 ### Fixed
 - `ExternalService.Gateway` now applies the `fuse: [strategy:, refresh:]` options
