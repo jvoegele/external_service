@@ -16,7 +16,9 @@ defmodule ExternalService.Mixfile do
       # Dialyzer: keep PLTs in a stable, cacheable location for CI
       dialyzer: [
         plt_local_path: "priv/plts",
-        plt_core_path: "priv/plts"
+        plt_core_path: "priv/plts",
+        ignore_warnings: ".dialyzer_ignore.exs",
+        list_unused_filters: true
       ],
 
       # Hex
