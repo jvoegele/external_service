@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 Work toward 2.0 (see `ROADMAP.md`). The 2.0 line modernizes the project and
 introduces breaking changes; a migration guide will accompany the release.
 
+### Added
+- Introspection for circuit breaker state ([issue #5](https://github.com/jvoegele/external_service/issues/5)):
+  `ExternalService.available?/1`, `ExternalService.blown?/1`, and
+  `ExternalService.all_available?/1`, plus `available?/0` and `blown?/0` on
+  modules using `ExternalService.Gateway`.
+- `:telemetry` events for guarded calls: `[:external_service, :call, :start | :stop | :exception]`
+  (a span around each call), `[:external_service, :call, :retry]`,
+  `[:external_service, :circuit_breaker, :blown]`, and
+  `[:external_service, :rate_limit, :sleep]`. See the `ExternalService` module
+  docs for measurements and metadata.
+- `RetryOptions.max_attempts` to bound the total number of attempts (initial plus
+  retries), complementing the existing time-based `:expiry`.
+- `RetryOptions.randomize` now also accepts a float jitter proportion (e.g.
+  `0.25` for +/- 25%) in addition to `true`/`false`.
+
 ### Fixed
 - `ExternalService.Gateway` now applies the `fuse: [strategy:, refresh:]` options
   it was configured with. Previously these keys did not match the

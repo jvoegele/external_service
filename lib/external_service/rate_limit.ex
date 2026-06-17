@@ -66,6 +66,13 @@ defmodule ExternalService.RateLimit do
 
       {:error, _} ->
         sleep_time = sleep_time(rate_limit)
+
+        :telemetry.execute(
+          [:external_service, :rate_limit, :sleep],
+          %{sleep_time: sleep_time},
+          %{service: rate_limit.fuse}
+        )
+
         log_sleep(rate_limit.fuse, bucket, limit, window, sleep_time, sleep_count)
         rate_limit.sleep.(sleep_time)
         call(rate_limit, function, sleep_count + 1)

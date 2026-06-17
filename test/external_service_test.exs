@@ -437,4 +437,188 @@ defmodule ExternalServiceTest do
       ExternalService.stop(name)
     end
   end
+
+  describe "retry options" do
+    test "max_attempts limits the total number of attempts" do
+      name = start_fuse(:"max-attempts-test")
+      Process.put(:count, 0)
+      opts = %RetryOptions{backoff: {:linear, 0, 1}, max_attempts: 3}
+
+      result =
+        ExternalService.call(name, opts, fn ->
+          Process.put(:count, Process.get(:count) + 1)
+          :retry
+        end)
+
+      assert Process.get(:count) == 3
+      assert result == {:error, {:retries_exhausted, :reason_unknown}}
+    end
+
+    test "max_attempts of 1 makes a single attempt with no retries" do
+      name = start_fuse(:"max-attempts-one")
+      Process.put(:count, 0)
+      opts = %RetryOptions{backoff: {:linear, 0, 1}, max_attempts: 1}
+
+      ExternalService.call(name, opts, fn ->
+        Process.put(:count, Process.get(:count) + 1)
+        :retry
+      end)
+
+      assert Process.get(:count) == 1
+    end
+
+    test "jitter affects only delay, not the attempt count" do
+      for randomize <- [true, 0.5] do
+        name = start_fuse(:"jitter-test-#{inspect(randomize)}")
+        counter = {:jitter_count, randomize}
+        Process.put(counter, 0)
+        opts = %RetryOptions{backoff: {:linear, 0, 1}, randomize: randomize, max_attempts: 3}
+
+        ExternalService.call(name, opts, fn ->
+          Process.put(counter, Process.get(counter) + 1)
+          :retry
+        end)
+
+        assert Process.get(counter) == 3
+      end
+    end
+  end
+
+  describe "introspection" do
+    setup do
+      name = :"introspection-test"
+      ExternalService.start(name, fuse_strategy: {:standard, 1, 10_000})
+      on_exit(fn -> ExternalService.stop(name) end)
+      [name: name]
+    end
+
+    test "available?/blown? for a freshly started service", %{name: name} do
+      assert ExternalService.available?(name)
+      refute ExternalService.blown?(name)
+    end
+
+    test "available?/blown? once the breaker is blown", %{name: name} do
+      blow_fuse(name)
+
+      assert ExternalService.blown?(name)
+      refute ExternalService.available?(name)
+    end
+
+    test "a service that was never started is neither available nor blown" do
+      refute ExternalService.available?(:"never-started-service")
+      refute ExternalService.blown?(:"never-started-service")
+    end
+
+    test "all_available? requires every service to be available", %{name: name} do
+      other = :"introspection-test-2"
+      ExternalService.start(other, fuse_strategy: {:standard, 1, 10_000})
+      on_exit(fn -> ExternalService.stop(other) end)
+
+      assert ExternalService.all_available?([name, other])
+
+      blow_fuse(other)
+      refute ExternalService.all_available?([name, other])
+    end
+  end
+
+  describe "telemetry" do
+    @telemetry_events [
+      [:external_service, :call, :start],
+      [:external_service, :call, :stop],
+      [:external_service, :call, :exception],
+      [:external_service, :call, :retry],
+      [:external_service, :circuit_breaker, :blown],
+      [:external_service, :rate_limit, :sleep]
+    ]
+
+    setup do
+      test_pid = self()
+      handler_id = "telemetry-test-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        handler_id,
+        @telemetry_events,
+        fn event, measurements, metadata, _config ->
+          send(test_pid, {:telemetry, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+      :ok
+    end
+
+    test "emits call start and stop for a successful call" do
+      name = start_fuse(:"telemetry-success")
+      assert ExternalService.call(name, fn -> {:ok, 42} end) == {:ok, 42}
+
+      assert_received {:telemetry, [:external_service, :call, :start], measurements,
+                       %{service: ^name}}
+
+      assert is_integer(measurements.system_time)
+
+      assert_received {:telemetry, [:external_service, :call, :stop], %{duration: duration},
+                       %{service: ^name, result: {:ok, 42}}}
+
+      assert is_integer(duration)
+    end
+
+    test "emits a retry event when the function asks to retry" do
+      name = start_fuse(:"telemetry-retry")
+      ExternalService.call(name, @expiring_retry_options, fn -> {:retry, :boom} end)
+
+      assert_received {:telemetry, [:external_service, :call, :retry], %{count: 1},
+                       %{service: ^name, reason: :boom}}
+    end
+
+    test "emits a call exception event when the function raises a non-retriable error" do
+      name = start_fuse(:"telemetry-exception")
+      retry_opts = %RetryOptions{backoff: {:linear, 0, 1}, rescue_only: [ArgumentError]}
+
+      assert_raise RuntimeError, fn ->
+        ExternalService.call(name, retry_opts, fn -> raise "boom" end)
+      end
+
+      assert_received {:telemetry, [:external_service, :call, :exception], %{duration: _},
+                       %{service: ^name, kind: :error, reason: %RuntimeError{}}}
+    end
+
+    test "emits a circuit_breaker blown event when the breaker is open" do
+      name = start_fuse(:"telemetry-blown", fuse_strategy: {:standard, 1, 10_000})
+      blow_fuse(name)
+      ExternalService.call(name, fn -> :ok end)
+
+      assert_received {:telemetry, [:external_service, :circuit_breaker, :blown], %{count: 1},
+                       %{service: ^name}}
+    end
+
+    test "emits a rate_limit sleep event when throttled" do
+      name = :"telemetry-rate-limit"
+      bucket = ExternalService.RateLimit.bucket_name(name)
+      sleep = fn _time -> ExRated.delete_bucket(bucket) end
+      ExternalService.start(name, rate_limit: {1, :timer.minutes(1)}, sleep_function: sleep)
+      on_exit(fn -> ExternalService.stop(name) end)
+
+      ExternalService.call(name, fn -> :ok end)
+      ExternalService.call(name, fn -> :ok end)
+
+      assert_received {:telemetry, [:external_service, :rate_limit, :sleep],
+                       %{sleep_time: sleep_time}, %{service: ^name}}
+
+      assert is_integer(sleep_time)
+    end
+  end
+
+  # Trips a service's circuit breaker by melting it past its configured tolerance.
+  defp blow_fuse(name) do
+    ExternalService.call(name, %RetryOptions{backoff: {:linear, 0, 1}}, fn -> :retry end)
+  end
+
+  # Starts a service with a high failure tolerance (so it won't blow) unless
+  # overridden, registers cleanup, and returns its name.
+  defp start_fuse(name, options \\ [fuse_strategy: {:standard, 100, 10_000}]) do
+    ExternalService.start(name, options)
+    on_exit(fn -> ExternalService.stop(name) end)
+    name
+  end
 end

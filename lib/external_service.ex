@@ -1,6 +1,49 @@
 defmodule ExternalService do
   @moduledoc """
   ExternalService handles all retry and circuit breaker logic for calls to external services.
+
+  ## Telemetry
+
+  `ExternalService` emits [`:telemetry`](https://hexdocs.pm/telemetry) events so
+  that calls to external services can be observed and instrumented. Attach a
+  handler to any of the events below to forward them to your metrics or logging
+  backend.
+
+  All events carry a `:service` key in their metadata, which is the fuse name of
+  the service the event relates to.
+
+    * `[:external_service, :call, :start]` - emitted when a guarded call begins.
+      * Measurements: `:system_time`, `:monotonic_time`
+      * Metadata: `:service`
+
+    * `[:external_service, :call, :stop]` - emitted when a guarded call completes
+      (including when it returns an error tuple such as `retries_exhausted` or
+      `fuse_blown`).
+      * Measurements: `:duration`, `:monotonic_time`
+      * Metadata: `:service`, `:result` (the value returned from the call)
+
+    * `[:external_service, :call, :exception]` - emitted when a guarded call
+      raises (for example a non-retriable exception, or `call!/3` raising on a
+      blown fuse or exhausted retries).
+      * Measurements: `:duration`, `:monotonic_time`
+      * Metadata: `:service`, `:kind`, `:reason`, `:stacktrace`
+
+    * `[:external_service, :call, :retry]` - emitted each time a call's function
+      fails in a way that melts the circuit breaker (it returned `:retry` /
+      `{:retry, reason}` or raised). Whether another attempt is actually made
+      depends on the retry options.
+      * Measurements: `:count` (always `1`)
+      * Metadata: `:service`, `:reason`
+
+    * `[:external_service, :circuit_breaker, :blown]` - emitted when a call is
+      rejected because the service's circuit breaker is blown.
+      * Measurements: `:count` (always `1`)
+      * Metadata: `:service`
+
+    * `[:external_service, :rate_limit, :sleep]` - emitted when a call is
+      throttled and put to sleep to stay within the configured rate limit.
+      * Measurements: `:sleep_time` (milliseconds)
+      * Metadata: `:service`
   """
 
   alias ExternalService.RateLimit
@@ -170,6 +213,55 @@ defmodule ExternalService do
   def reset_fuse(fuse_name), do: Fuse.reset(fuse_name)
 
   @doc """
+  Returns `true` if the service is currently available, meaning its circuit
+  breaker is not blown.
+
+  This is useful for the circuit breaker pattern: before kicking off expensive
+  work, you can check whether the services it depends on are available and bail
+  out early (returning a degraded response) if any of them are not.
+
+  A service that has not been started (see `start/2`) is reported as not
+  available. Note that availability can change between this check and a
+  subsequent `call/3`, so this is a best-effort signal, not a guarantee.
+
+  ## Examples
+
+      if ExternalService.available?(:payments) do
+        charge(order)
+      else
+        {:error, :payments_unavailable}
+      end
+  """
+  @spec available?(fuse_name()) :: boolean()
+  def available?(fuse_name), do: Fuse.ask(fuse_name, :sync) == :ok
+
+  @doc """
+  Returns `true` if the service's circuit breaker is currently blown.
+
+  A service that has not been started (see `start/2`) is _not_ considered blown;
+  use `available?/1` if you want "ready to use" semantics that also account for
+  services that were never started.
+  """
+  @spec blown?(fuse_name()) :: boolean()
+  def blown?(fuse_name), do: Fuse.ask(fuse_name, :sync) == :blown
+
+  @doc """
+  Returns `true` only if every service in `fuse_names` is `available?/1`.
+
+  Useful for guarding work that depends on several services at once.
+
+  ## Examples
+
+      if ExternalService.all_available?([:payments, :inventory]) do
+        place_order(order)
+      else
+        {:error, :service_unavailable}
+      end
+  """
+  @spec all_available?([fuse_name()]) :: boolean()
+  def all_available?(fuse_names), do: Enum.all?(fuse_names, &available?/1)
+
+  @doc """
   Given a fuse name and retry options execute a function handling any retry and circuit breaker
   logic.
 
@@ -183,12 +275,14 @@ defmodule ExternalService do
   @spec call(fuse_name(), RetryOptions.t(), retriable_function()) ::
           error | (function_result :: any)
   def call(fuse_name, retry_opts \\ %RetryOptions{}, function) do
-    case call_with_retry(fuse_name, retry_opts, function) do
-      {:no_retry, result} -> result
-      {:error, :retry} -> {:error, {:retries_exhausted, :reason_unknown}}
-      {:error, {:retry, reason}} -> {:error, {:retries_exhausted, reason}}
-      result -> result
-    end
+    call_span(fuse_name, fn ->
+      case call_with_retry(fuse_name, retry_opts, function) do
+        {:no_retry, result} -> result
+        {:error, :retry} -> {:error, {:retries_exhausted, :reason_unknown}}
+        {:error, {:retry, reason}} -> {:error, {:retries_exhausted, reason}}
+        result -> result
+      end
+    end)
   end
 
   @doc """
@@ -197,23 +291,25 @@ defmodule ExternalService do
   @spec call!(fuse_name(), RetryOptions.t(), retriable_function()) ::
           function_result :: any | no_return
   def call!(fuse_name, retry_opts \\ %RetryOptions{}, function) do
-    case call_with_retry(fuse_name, retry_opts, function) do
-      {:no_retry, result} ->
-        result
+    call_span(fuse_name, fn ->
+      case call_with_retry(fuse_name, retry_opts, function) do
+        {:no_retry, result} ->
+          result
 
-      {:error, :retry} ->
-        raise ExternalService.RetriesExhaustedError, message: "fuse_name: #{fuse_name}"
+        {:error, :retry} ->
+          raise ExternalService.RetriesExhaustedError, message: "fuse_name: #{fuse_name}"
 
-      {:error, {:retry, reason}} ->
-        raise ExternalService.RetriesExhaustedError,
-          message: "reason: #{inspect(reason)}, fuse_name: #{fuse_name}"
+        {:error, {:retry, reason}} ->
+          raise ExternalService.RetriesExhaustedError,
+            message: "reason: #{inspect(reason)}, fuse_name: #{fuse_name}"
 
-      {:error, {:fuse_blown, fuse_name}} ->
-        raise ExternalService.FuseBlownError, message: inspect(fuse_name)
+        {:error, {:fuse_blown, fuse_name}} ->
+          raise ExternalService.FuseBlownError, message: inspect(fuse_name)
 
-      {:error, {:fuse_not_found, fuse_name}} ->
-        raise ExternalService.FuseNotFoundError, message: fuse_not_found_message(fuse_name)
-    end
+        {:error, {:fuse_not_found, fuse_name}} ->
+          raise ExternalService.FuseNotFoundError, message: fuse_not_found_message(fuse_name)
+      end
+    end)
   end
 
   @doc """
@@ -298,9 +394,15 @@ defmodule ExternalService do
 
     Retry.retry with: apply_retry_options(retry_opts), rescue_only: retry_opts.rescue_only do
       case Fuse.ask(fuse_name, :sync) do
-        :ok -> try_function(fuse_name, function)
-        :blown -> throw(:blown)
-        {:error, :not_found} -> throw(:not_found)
+        :ok ->
+          try_function(fuse_name, function)
+
+        :blown ->
+          emit_blown(fuse_name)
+          throw(:blown)
+
+        {:error, :not_found} ->
+          throw(:not_found)
       end
     after
       {:no_retry, _} = result -> result
@@ -327,16 +429,32 @@ defmodule ExternalService do
         {:linear, initial_delay, factor} -> linear_backoff(initial_delay, factor)
       end
 
-    retry_opts
-    |> Map.take([:randomize, :expiry, :cap])
-    |> Enum.reduce(delay_stream, fn {key, value}, acc ->
-      if value do
-        apply(Retry.DelayStreams, key, [acc, value])
-      else
-        acc
-      end
-    end)
+    delay_stream
+    |> apply_randomize(retry_opts.randomize)
+    |> apply_if(retry_opts.cap, &cap/2)
+    |> apply_if(retry_opts.expiry, &expiry/2)
+    |> apply_max_attempts(retry_opts.max_attempts)
   end
+
+  # `randomize` accepts a boolean or an explicit jitter proportion. Note that
+  # `Retry.DelayStreams.randomize/2` expects a number, so a bare `true` must use
+  # the arity-1 default rather than being passed through.
+  defp apply_randomize(stream, proportion) when is_number(proportion),
+    do: Retry.DelayStreams.randomize(stream, proportion)
+
+  defp apply_randomize(stream, true), do: Retry.DelayStreams.randomize(stream)
+  defp apply_randomize(stream, _falsy), do: stream
+
+  defp apply_if(stream, nil, _fun), do: stream
+  defp apply_if(stream, value, fun), do: fun.(stream, value)
+
+  # `max_attempts` counts the initial attempt plus retries, so the delay stream
+  # (one delay per retry) is limited to `max_attempts - 1` elements.
+  defp apply_max_attempts(stream, nil), do: stream
+
+  defp apply_max_attempts(stream, max_attempts)
+       when is_integer(max_attempts) and max_attempts > 0,
+       do: Stream.take(stream, max_attempts - 1)
 
   @spec try_function(fuse_name, retriable_function) ::
           {:error, {:retry, any}} | {:error, :retry} | {:no_retry, any} | no_return
@@ -345,10 +463,12 @@ defmodule ExternalService do
 
     case RateLimit.call(rate_limit, function) do
       {:retry, reason} ->
+        emit_retry(fuse_name, reason)
         Fuse.melt(fuse_name)
         {:error, {:retry, reason}}
 
       :retry ->
+        emit_retry(fuse_name, :reason_unknown)
         Fuse.melt(fuse_name)
         {:error, :retry}
 
@@ -357,8 +477,32 @@ defmodule ExternalService do
     end
   rescue
     error ->
+      emit_retry(fuse_name, error)
       Fuse.melt(fuse_name)
       reraise error, __STACKTRACE__
+  end
+
+  defp call_span(fuse_name, fun) do
+    :telemetry.span([:external_service, :call], %{service: fuse_name}, fn ->
+      result = fun.()
+      {result, %{service: fuse_name, result: result}}
+    end)
+  end
+
+  defp emit_retry(fuse_name, reason) do
+    :telemetry.execute(
+      [:external_service, :call, :retry],
+      %{count: 1},
+      %{service: fuse_name, reason: reason}
+    )
+  end
+
+  defp emit_blown(fuse_name) do
+    :telemetry.execute(
+      [:external_service, :circuit_breaker, :blown],
+      %{count: 1},
+      %{service: fuse_name}
+    )
   end
 
   defp log_fuse_not_found(fuse_name) do
