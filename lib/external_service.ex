@@ -248,13 +248,21 @@ defmodule ExternalService do
   `ExternalService.start` must be run with the fuse name before using call.
 
   The provided function can indicate that a retry should be performed by returning the atom
-  `:retry` or a tuple of the form `{:retry, reason}`, where `reason` is any arbitrary term, or by
-  raising a `RuntimeError`. Any other result is considered successful so the operation will not be
-  retried and the result of the function will be returned as the result of `call`.
+  `:retry` or a tuple of the form `{:retry, reason}`, where `reason` is any arbitrary term. Any
+  other result is considered successful, so the operation will not be retried and the result of
+  the function will be returned as the result of `call`.
+
+  Raised exceptions are only retried if their type is listed in the `:retry_on` retry option
+  (which defaults to `[]`); otherwise they propagate to the caller.
+
+  `retry_opts` may be a `t:ExternalService.RetryOptions.t/0` struct or a keyword list of
+  `t:ExternalService.RetryOptions.t/0` options.
   """
-  @spec call(fuse_name(), RetryOptions.t(), retriable_function()) ::
+  @spec call(fuse_name(), RetryOptions.t() | keyword(), retriable_function()) ::
           error | (function_result :: any)
   def call(fuse_name, retry_opts \\ %RetryOptions{}, function) do
+    retry_opts = RetryOptions.new(retry_opts)
+
     call_span(fuse_name, fn ->
       case call_with_retry(fuse_name, retry_opts, function) do
         {:no_retry, result} -> result
@@ -269,9 +277,11 @@ defmodule ExternalService do
   @doc """
   Like `call/3`, but raises an exception if retries are exhausted or the fuse is blown.
   """
-  @spec call!(fuse_name(), RetryOptions.t(), retriable_function()) ::
+  @spec call!(fuse_name(), RetryOptions.t() | keyword(), retriable_function()) ::
           function_result :: any | no_return
   def call!(fuse_name, retry_opts \\ %RetryOptions{}, function) do
+    retry_opts = RetryOptions.new(retry_opts)
+
     call_span(fuse_name, fn ->
       case call_with_retry(fuse_name, retry_opts, function) do
         {:no_retry, result} -> result
@@ -362,7 +372,7 @@ defmodule ExternalService do
   defp call_with_retry(fuse_name, retry_opts, function) do
     require Retry
 
-    Retry.retry with: apply_retry_options(retry_opts), rescue_only: retry_opts.rescue_only do
+    Retry.retry with: apply_retry_options(retry_opts), rescue_only: retry_opts.retry_on do
       case Fuse.ask(fuse_name, :sync) do
         :ok ->
           try_function(fuse_name, function)
@@ -395,25 +405,25 @@ defmodule ExternalService do
 
     delay_stream =
       case retry_opts.backoff do
-        {:exponential, initial_delay} -> exponential_backoff(initial_delay)
-        {:linear, initial_delay, factor} -> linear_backoff(initial_delay, factor)
+        :exponential -> exponential_backoff(retry_opts.base)
+        :linear -> linear_backoff(retry_opts.base, retry_opts.factor)
       end
 
     delay_stream
-    |> apply_randomize(retry_opts.randomize)
+    |> apply_jitter(retry_opts.jitter)
     |> apply_if(retry_opts.cap, &cap/2)
     |> apply_if(retry_opts.expiry, &expiry/2)
     |> apply_max_attempts(retry_opts.max_attempts)
   end
 
-  # `randomize` accepts a boolean or an explicit jitter proportion. Note that
+  # `jitter` accepts a boolean or an explicit proportion. Note that
   # `Retry.DelayStreams.randomize/2` expects a number, so a bare `true` must use
   # the arity-1 default rather than being passed through.
-  defp apply_randomize(stream, proportion) when is_number(proportion),
+  defp apply_jitter(stream, proportion) when is_number(proportion),
     do: Retry.DelayStreams.randomize(stream, proportion)
 
-  defp apply_randomize(stream, true), do: Retry.DelayStreams.randomize(stream)
-  defp apply_randomize(stream, _falsy), do: stream
+  defp apply_jitter(stream, true), do: Retry.DelayStreams.randomize(stream)
+  defp apply_jitter(stream, _falsy), do: stream
 
   defp apply_if(stream, nil, _fun), do: stream
   defp apply_if(stream, value, fun), do: fun.(stream, value)

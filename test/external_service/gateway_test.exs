@@ -29,7 +29,7 @@ defmodule ExternalService.GatewayTest do
   defmodule IntrospectionGateway do
     use ExternalService.Gateway,
       fuse: [name: :introspection_gateway_fuse, strategy: {:standard, 1, 10_000}],
-      retry: [backoff: {:linear, 0, 1}]
+      retry: [backoff: :linear, base: 0]
   end
 
   describe "child_spec" do

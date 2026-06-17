@@ -1,67 +1,93 @@
 defmodule ExternalService.RetryOptions do
+  @schema [
+    backoff: [
+      type: {:in, [:exponential, :linear]},
+      default: :exponential,
+      doc: "The backoff strategy used to grow the delay between retries."
+    ],
+    base: [
+      type: :non_neg_integer,
+      default: 10,
+      doc: "The initial delay between retries, in milliseconds (`0` for no delay)."
+    ],
+    factor: [
+      type: :pos_integer,
+      default: 1,
+      doc: "Growth factor applied on each retry. Only used for `:linear` backoff."
+    ],
+    cap: [
+      type: :pos_integer,
+      doc: "Caps the delay between retries to at most this many milliseconds."
+    ],
+    expiry: [
+      type: :pos_integer,
+      doc: "Total time budget for retries, in milliseconds. Retrying stops once exceeded."
+    ],
+    max_attempts: [
+      type: :pos_integer,
+      doc:
+        "Maximum number of attempts (the initial attempt plus retries). " <>
+          "Defaults to no limit, bounded only by `:expiry` and/or the circuit breaker."
+    ],
+    jitter: [
+      type: {:or, [:boolean, :float]},
+      default: false,
+      doc:
+        "Random jitter applied to delays. `true` applies +/- 10%; a float (e.g. `0.25`) " <>
+          "applies that proportion. Helps avoid retrying in lockstep (thundering herd)."
+    ],
+    retry_on: [
+      type: {:list, :atom},
+      default: [],
+      doc:
+        "Exception modules that should trigger a retry when raised. Defaults to `[]`, " <>
+          "meaning raised exceptions are not retried; use `:retry`/`{:retry, reason}` return " <>
+          "values to drive retries instead."
+    ]
+  ]
+
   @moduledoc """
-  Options used for controlling retry logic.
-  See the [retry docs](https://hexdocs.pm/retry/Retry.html) for information about the available
-  retry options.
+  Options that control retry logic for calls to external services.
+
+  Retry options can be given either as this struct or as a plain keyword list
+  (which is validated and converted with `new/1`). The available options are:
+
+  #{NimbleOptions.docs(@schema)}
   """
 
-  @typedoc """
-  A tuple describing the backoff strategy for increasing delay between retries.
+  @validated_schema NimbleOptions.new!(@schema)
 
-  The first element of the tuple must be one of the atoms `:exponential` or `:linear`.
-  In both cases, the second element of the tuple is an integer representing the initial delay
-  between retries, in milliseconds.
-  For linear delay, there is also a third element in the tuple, which is a number representing
-  the factor that the initial delay will be multiplied by on each successive retry.
-  """
-  @type backoff ::
-          {:exponential, initial_delay :: pos_integer()}
-          | {:linear, initial_delay :: pos_integer(), factor :: pos_integer()}
-
-  @typedoc """
-  Controls how much random jitter is applied to the delay between retries.
-
-    * `false` (the default) applies no jitter.
-    * `true` applies the default jitter of +/- 10%.
-    * a number between `0.0` and `1.0` applies that proportion of jitter
-      (for example `0.25` for +/- 25%).
-
-  Jitter helps avoid the "thundering herd" problem, where many clients that
-  failed at the same time would otherwise retry in lockstep.
-  """
-  @type randomize :: boolean() | float()
-
-  @typedoc """
-  Struct representing the retry options to apply to calls to external services.
-
-    * `backoff`: tuple describing the backoff strategy (see `t:backoff/0`)
-    * `randomize`: how much random jitter to apply to delays (see `t:randomize/0`)
-    * `expiry`: limit the total length of time to allow for retries to the
-        specified time budget, in milliseconds
-    * `max_attempts`: limit the total number of attempts (the initial attempt
-        plus any retries) to the specified number; defaults to `nil` (no limit,
-        bounded only by `expiry` and/or the circuit breaker)
-    * `cap`: limit maximum amount of time between retries to the specified number of milliseconds
-    * `rescue_only`: retry only on exceptions matching one of the list of provided exception types,
-        (defaults to `[RuntimeError]`)
-  """
   @type t :: %__MODULE__{
-          backoff: backoff(),
-          randomize: randomize(),
+          backoff: :exponential | :linear,
+          base: non_neg_integer(),
+          factor: pos_integer(),
+          cap: pos_integer() | nil,
           expiry: pos_integer() | nil,
           max_attempts: pos_integer() | nil,
-          cap: pos_integer() | nil,
-          rescue_only: list(module())
+          jitter: boolean() | float(),
+          retry_on: [module()]
         }
 
-  defstruct backoff: {:exponential, 10},
-            randomize: false,
+  defstruct backoff: :exponential,
+            base: 10,
+            factor: 1,
+            cap: nil,
             expiry: nil,
             max_attempts: nil,
-            cap: nil,
-            rescue_only: [RuntimeError]
+            jitter: false,
+            retry_on: []
 
-  def new(opts) do
-    struct(__MODULE__, opts)
+  @doc """
+  Builds a validated `RetryOptions` struct from a keyword list (or returns an
+  existing struct unchanged).
+
+  Raises `NimbleOptions.ValidationError` if the options are invalid.
+  """
+  @spec new(t() | keyword()) :: t()
+  def new(%__MODULE__{} = retry_options), do: retry_options
+
+  def new(opts) when is_list(opts) do
+    validated = NimbleOptions.validate!(opts, @validated_schema)
+    struct(__MODULE__, validated)
   end
 end
