@@ -145,7 +145,9 @@ retry: [retry_on: [MyApp.TransientError, DBConnection.ConnectionError]]
 ```
 
 Now a raised `MyApp.TransientError` triggers a retry just like a `:retry` return
-value would; exceptions not in the list still propagate.
+value would, and it melts the circuit breaker. Exceptions not in the list still
+propagate untouched and leave the breaker alone — `:retry_on` governs both
+retrying and whether a raised exception counts against the breaker.
 
 > #### Prefer return values over exceptions {: .tip}
 >

@@ -148,6 +148,20 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == 1
     end
 
+    test "an exception not listed in retry_on does not melt the circuit breaker" do
+      retry_opts = %{@retry_opts | retry_on: [ArgumentError]}
+
+      # Raise far more times than the breaker would tolerate; because the
+      # exception is not retriable, none of these should count as a failure.
+      for _ <- 1..(@fuse_retries * 3) do
+        assert_raise(RuntimeError, fn ->
+          ExternalService.call(@fuse_name, retry_opts, fn -> raise "KABOOM!" end)
+        end)
+      end
+
+      assert ExternalService.available?(@fuse_name)
+    end
+
     test "returns CircuitBreakerOpen when the fuse is blown by retries" do
       res =
         ExternalService.call(@fuse_name, @retry_opts, fn ->

@@ -74,7 +74,11 @@ introduces breaking changes. See the
   - `randomize` is now `jitter`.
   - `rescue_only` is now `retry_on`, and **defaults to `[]`** — raised exceptions
     are no longer retried by default ([issue #7](https://github.com/jvoegele/external_service/issues/7)).
-    List exception modules in `:retry_on` to retry on them.
+    List exception modules in `:retry_on` to retry on them. `:retry_on` now also
+    governs the circuit breaker: an exception that is not retried no longer melts
+    the breaker (it propagates untouched), so a raised exception counts as a
+    circuit-breaker failure only when its type is in `:retry_on`. Explicit
+    `:retry` / `{:retry, reason}` return values always melt the breaker.
   - `call/3` and `call!/3` now also accept a keyword list of retry options.
 - `use ExternalService.Gateway` is **deprecated** in favor of `use ExternalService`.
   It still works (emitting a deprecation warning) and keeps the `external_call/*`
