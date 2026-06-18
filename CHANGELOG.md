@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
-Work toward 2.0 (see `ROADMAP.md`). The 2.0 line modernizes the project and
+## [2.0.0-rc.1] - 2026-06-18
+
+First release candidate for 2.0. The 2.0 line modernizes the project and
 introduces breaking changes. See the
 [migration guide](guides/migrating-to-2.0.md) for a step-by-step upgrade from
 1.x.
@@ -146,7 +148,8 @@ introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/1.0.1...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/2.0.0-rc.1...HEAD
+[2.0.0-rc.1]: https://github.com/jvoegele/external_service/compare/1.1.4...2.0.0-rc.1
 [1.1.2]: https://github.com/jvoegele/external_service/compare/1.1.1...1.1.2
 [1.1.1]: https://github.com/jvoegele/external_service/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/jvoegele/external_service/compare/1.0.1...1.1.0

@@ -114,8 +114,9 @@ MyApp.Stripe.reset()
       (atom `backoff` + `base`/`factor`, `jitter`), NimbleOptions validation throughout.
 - [x] Services remember their default retry options (`start/2` `:retry`), used by `call/2`.
 
-> Circuit-breaker melt semantics intentionally unchanged: a failure still melts the
-> breaker; `:retry_on` only governs whether the attempt is retried.
+> Circuit-breaker melt semantics were left unchanged in M4 and revisited in M6:
+> as of M6, `:retry_on` governs both retrying and melting — a raised exception
+> melts the breaker only when its type is retriable.
 
 ### M5 — Documentation overhaul ✓
 - [x] Split the README into `guides/` (mirror Bond): getting-started, the module
@@ -128,8 +129,13 @@ MyApp.Stripe.reset()
 - [x] Wrote the 1.x → 2.0 migration guide the CHANGELOG references.
 
 ### M6 — Release prep
-- [ ] CHANGELOG, migration guide, deprecation warnings on 1.x paths.
-- [ ] Cut `2.0.0-rc.1`, gather feedback, then `2.0.0`.
+- [x] `:retry_on` now governs circuit-breaker melting (non-retried exceptions no
+      longer trip the breaker).
+- [x] CHANGELOG/migration-guide final pass; deprecation-warning review on 1.x
+      paths (the `use ExternalService.Gateway` compile-time warning is the only
+      one; functional-API renames are clean breaks with clear validation errors).
+- [x] Bump version to `2.0.0-rc.1` and stamp the CHANGELOG.
+- [ ] Tag, publish `2.0.0-rc.1` to Hex, gather feedback, then bump to `2.0.0`.
 
 ## Deferred to 2.1+
 - Pluggable rate-limit backend (issue #12) and circuit-breaker/state backend for
