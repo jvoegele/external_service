@@ -2,10 +2,10 @@
 
 `ExternalService` distinguishes two kinds of failure:
 
-  * **Errors from the service itself** — whatever your wrapped function returns
-    or raises. These pass through untouched; they are yours to handle.
-  * **Errors from `ExternalService`** — retries exhausted, or the circuit
-    breaker open. These are surfaced as structured error types.
+- **Errors from the service itself** — whatever your wrapped function returns
+  or raises. These pass through untouched; they are yours to handle.
+- **Errors from `ExternalService`** — retries exhausted, or the circuit
+  breaker open. These are surfaced as structured error types.
 
 Keeping the two straight is the key to clean error handling. This guide covers
 the structured error types and the choice between `call/3` and `call!/3`.
@@ -13,14 +13,14 @@ the structured error types and the choice between `call/3` and `call!/3`.
 ## The structured error types
 
 `ExternalService` errors are built on [Errata](https://hexdocs.pm/errata)
-infrastructure errors. The same struct is *returned* by `call/3` (inside an
-`{:error, struct}` tuple) and *raised* by `call!/3`.
+infrastructure errors. The same struct is _returned_ by `call/3` (inside an
+`{:error, struct}` tuple) and _raised_ by `call!/3`.
 
-| Error | Returned/raised when | `http_status/1` |
-| --- | --- | --- |
-| `ExternalService.RetriesExhausted` | retries (count or time budget) were exhausted | `503` |
-| `ExternalService.CircuitBreakerOpen` | a call was rejected because the breaker is open | `503` |
-| `ExternalService.ServiceNotStarted` | a call was made to a service never started with `start/2` | `500` |
+| Error                                | Returned/raised when                                      | `http_status/1` |
+| ------------------------------------ | --------------------------------------------------------- | --------------- |
+| `ExternalService.RetriesExhausted`   | retries (count or time budget) were exhausted             | `503`           |
+| `ExternalService.CircuitBreakerOpen` | a call was rejected because the breaker is open           | `503`           |
+| `ExternalService.ServiceNotStarted`  | a call was made to a service never started with `start/2` | `500`           |
 
 Each carries a `:context` map that always includes the `:service` it relates to.
 `RetriesExhausted` additionally carries `:context.reason` — the value from the
@@ -61,7 +61,7 @@ end
 ```
 
 Notice the last clause: an `{:error, :card_declined}` that your function returned
-is *not* an `ExternalService` error. It flows through `call` unchanged, so you
+is _not_ an `ExternalService` error. It flows through `call` unchanged, so you
 handle it like any other domain result.
 
 ## `call!` — errors as exceptions
@@ -83,7 +83,7 @@ rescue
 end
 ```
 
-`call!/3` only *raises* the `ExternalService` errors; values your function
+`call!/3` only _raises_ the `ExternalService` errors; values your function
 returns are still returned normally. And because every error knows its own
 `http_status/1`, you can collapse the handling further:
 
@@ -97,15 +97,15 @@ end
 
 ## Which should I use?
 
-  * Use **`call/3`** when an `ExternalService` failure is a normal branch in your
-    logic — you want to fall back to cached data, return a specific domain error,
-    or otherwise react in line.
-  * Use **`call!/3`** when an `ExternalService` failure should abort the current
-    unit of work and be handled uniformly higher up (a Phoenix action, an Oban
-    job, a task). It keeps the happy path readable.
+- Use **`call/3`** when an `ExternalService` failure is a normal branch in your
+  logic — you want to fall back to cached data, return a specific domain error,
+  or otherwise react in line.
+- Use **`call!/3`** when an `ExternalService` failure should abort the current
+  unit of work and be handled uniformly higher up (a Phoenix action, an Oban
+  job, a task). It keeps the happy path readable.
 
 Both apply identical retry and circuit-breaker behavior; they differ only in how
-the *library's* failures are delivered.
+the _library's_ failures are delivered.
 
 ## A note on exceptions from your function
 

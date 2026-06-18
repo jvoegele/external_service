@@ -4,9 +4,9 @@
 APIs, combining three well-established reliability techniques behind one small
 interface:
 
-  * **Retries** for transient failures,
-  * the **Circuit Breaker** pattern for persistent failures, and
-  * **rate limiting** for staying within a service's quota.
+- **Retries** for transient failures,
+- the **Circuit Breaker** pattern for persistent failures, and
+- **rate limiting** for staying within a service's quota.
 
 Calls can be synchronous, asynchronous background tasks, or fanned out in
 parallel for MapReduce-style processing — all under the same retry, circuit
@@ -26,7 +26,7 @@ both attempt-count and time budgets — using
 
 ### Circuit breakers
 
-The Circuit Breaker pattern was first described in Michael Nygard's *Release It!*
+The Circuit Breaker pattern was first described in Michael Nygard's _Release It!_
 and later popularized by Martin Fowler. To quote Nygard, "Circuit breakers are a
 way to automatically degrade functionality when the system is under stress."
 

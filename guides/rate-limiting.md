@@ -1,7 +1,7 @@
 # Rate Limiting
 
-Many external services impose a quota: *no more than N requests per time
-window.* Exceed it and you get throttled (or billed, or blocked).
+Many external services impose a quota: _no more than N requests per time
+window._ Exceed it and you get throttled (or billed, or blocked).
 `ExternalService` can keep you under that quota automatically, across your entire
 application, using the [ex_rated](https://hex.pm/packages/ex_rated) library.
 
@@ -21,10 +21,10 @@ use ExternalService,
   ]
 ```
 
-| Option | Required | Meaning |
-| --- | --- | --- |
-| `:limit` | yes | Maximum number of calls allowed within each `:per` window. |
-| `:per` | yes | Length of the rate-limiting window, in milliseconds. |
+| Option   | Required | Meaning                                                    |
+| -------- | -------- | ---------------------------------------------------------- |
+| `:limit` | yes      | Maximum number of calls allowed within each `:per` window. |
+| `:per`   | yes      | Length of the rate-limiting window, in milliseconds.       |
 
 Both keys are required when `:rate_limit` is present.
 
@@ -32,7 +32,7 @@ Both keys are required when `:rate_limit` is present.
 
 The limit is tracked per service and shared across every caller in your
 application — every process that calls the service draws from the same bucket. So
-the example above guarantees no more than 100 calls per second *in total*, no
+the example above guarantees no more than 100 calls per second _in total_, no
 matter how many processes are making them.
 
 When a call would exceed the limit, `ExternalService` does not fail it. Instead
@@ -51,11 +51,11 @@ end)
 
 The sleeping happens in whichever process is making the call:
 
-  * With `call/1` (synchronous), the **calling process** sleeps. Your code blocks
-    until the call is allowed.
-  * With `call_async/1` and `call_async_stream/2`, the **background task(s)**
-    sleep, not your calling process. This is often what you want for bulk work:
-    kick off the stream and let the workers pace themselves.
+- With `call/1` (synchronous), the **calling process** sleeps. Your code blocks
+  until the call is allowed.
+- With `call_async/1` and `call_async_stream/2`, the **background task(s)**
+  sleep, not your calling process. This is often what you want for bulk work:
+  kick off the stream and let the workers pace themselves.
 
 ```elixir
 # Bulk import that respects the rate limit without blocking the caller:

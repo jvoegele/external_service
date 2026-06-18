@@ -1,6 +1,6 @@
 # Retries
 
-Many failures when calling an external service are *transient*: a momentary
+Many failures when calling an external service are _transient_: a momentary
 timeout, a brief overload, a connection reset. The simplest effective response is
 to try again — perhaps after a short backoff. `ExternalService` automates this
 using the [retry](https://hex.pm/packages/retry) library, exposing its
@@ -11,8 +11,8 @@ flexibility through the `ExternalService.RetryOptions` struct.
 Inside the function you pass to `call`, you signal that a retry should happen by
 returning either:
 
-  * the atom `:retry`, or
-  * a tuple `{:retry, reason}`, where `reason` is any term.
+- the atom `:retry`, or
+- a tuple `{:retry, reason}`, where `reason` is any term.
 
 Anything else is a success and is returned to the caller as-is — including the
 function's own `{:error, reason}` results. You decide what is retriable:
@@ -22,8 +22,8 @@ call fn ->
   case HTTP.post(url, body) do
     {:ok, %{status: 200} = resp}            -> {:ok, resp}
     {:ok, %{status: s}} when s in 500..599  -> {:retry, s}   # retry server errors
-    {:ok, %{status: 429}}                   -> :retry         # retry throttling
-    {:ok, %{status: 4xx}} = resp            -> resp           # client error: don't retry
+    {:ok, %{status: 429}}                   -> :retry        # retry throttling
+    {:ok, %{status: 4xx}} = resp            -> resp          # client error: don't retry
     {:error, reason}                        -> {:error, reason}
   end
 end
@@ -50,21 +50,21 @@ call [max_attempts: 2, backoff: :linear, base: 50], fn -> work() end
 call %ExternalService.RetryOptions{max_attempts: 2}, fn -> work() end
 ```
 
-When you use the two-argument `call/1` (no options), the service's default
+When you use the two-argument `call/2` (no options), the service's default
 `:retry` options apply.
 
 ### The options
 
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `:backoff` | `:exponential` | Growth strategy for the delay between retries: `:exponential` or `:linear`. |
-| `:base` | `10` | Initial delay between retries, in milliseconds (`0` for no delay). |
-| `:factor` | `1` | Growth factor applied each retry. Only used for `:linear` backoff. |
-| `:cap` | — | Caps the delay between retries to at most this many milliseconds. |
-| `:expiry` | — | Total time budget for retries, in milliseconds. Retrying stops once exceeded. |
-| `:max_attempts` | — | Maximum number of attempts (initial plus retries). No limit by default. |
-| `:jitter` | `false` | Random jitter on delays. `true` applies ±10%; a float (e.g. `0.25`) applies that proportion. |
-| `:retry_on` | `[]` | Exception modules that should trigger a retry when raised. |
+| Option          | Default        | Meaning                                                                                      |
+| --------------- | -------------- | -------------------------------------------------------------------------------------------- |
+| `:backoff`      | `:exponential` | Growth strategy for the delay between retries: `:exponential` or `:linear`.                  |
+| `:base`         | `10`           | Initial delay between retries, in milliseconds (`0` for no delay).                           |
+| `:factor`       | `1`            | Growth factor applied each retry. Only used for `:linear` backoff.                           |
+| `:cap`          | —              | Caps the delay between retries to at most this many milliseconds.                            |
+| `:expiry`       | —              | Total time budget for retries, in milliseconds. Retrying stops once exceeded.                |
+| `:max_attempts` | —              | Maximum number of attempts (initial plus retries). No limit by default.                      |
+| `:jitter`       | `false`        | Random jitter on delays. `true` applies ±10%; a float (e.g. `0.25`) applies that proportion. |
+| `:retry_on`     | `[]`           | Exception modules that should trigger a retry when raised.                                   |
 
 Options are validated when the struct is built; an invalid value raises
 `NimbleOptions.ValidationError` with a helpful message.
@@ -93,10 +93,10 @@ retry: [backoff: :linear, base: 100, factor: 1]
 Left unbounded, retries continue indefinitely (until the circuit breaker opens).
 You almost always want a bound. There are two, and they compose:
 
-  * **`:max_attempts`** — a count. `max_attempts: 5` means at most five attempts
-    total (the first try plus four retries).
-  * **`:expiry`** — a time budget in milliseconds. Once cumulative retry time
-    exceeds it, retrying stops.
+- **`:max_attempts`** — a count. `max_attempts: 5` means at most five attempts
+  total (the first try plus four retries).
+- **`:expiry`** — a time budget in milliseconds. Once cumulative retry time
+  exceeds it, retrying stops.
 
 You can use either or both; whichever is reached first stops the retries. When
 the bound is hit without success, `call/3` returns
@@ -120,7 +120,7 @@ retry: [backoff: :exponential, base: 100, cap: :timer.seconds(2)]
 ## Jitter
 
 When many processes retry on the same schedule, they retry in lockstep and slam
-the recovering service all at once — the *thundering herd*. Jitter randomizes
+the recovering service all at once — the _thundering herd_. Jitter randomizes
 each delay to spread them out:
 
 ```elixir

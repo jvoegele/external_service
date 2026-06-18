@@ -26,14 +26,13 @@ Calling an external service is risky: the network hiccups, the service is
 briefly overloaded, or it goes down entirely. `ExternalService` wraps those
 calls with two complementary safety mechanisms:
 
-  * **Retries** smooth over *transient* failures by trying a failed request
-    again, with configurable backoff.
-  * A **circuit breaker** protects you from a service that is *persistently*
-    failing: once failures cross a threshold the breaker "opens" and further
-    calls fail fast instead of piling up against a service that is already down.
-
-Optionally, a **rate limiter** keeps you under the call quota the external
-service imposes.
+- **Retries** smooth over _transient_ failures by trying a failed request
+  again, with configurable backoff.
+- A **circuit breaker** protects you from a service that is _persistently_
+  failing: once failures cross a threshold the breaker "opens" and further
+  calls fail fast instead of piling up against a service that is already down.
+- Optionally, a **rate limiter** keeps you under the call quota the external
+  service imposes.
 
 You wrap your call to the external service in a function, hand that function to
 `ExternalService`, and it applies all of the above on every call.
@@ -64,12 +63,12 @@ end
 
 A few things to notice:
 
-  * The module configures its own circuit breaker and retry policy. No fuse
-    names to juggle at the call site.
-  * `charge/1` wraps the real Stripe call in a zero-argument function and passes
-    it to the generated `call/1`.
-  * The function returns `:retry` (or `{:retry, reason}`) to ask for another
-    attempt; any other value is treated as success and returned as-is.
+- The module configures its own circuit breaker and retry policy. No fuse
+  names to juggle at the call site.
+- `charge/1` wraps the real Stripe call in a zero-argument function and passes
+  it to the generated `call/1`.
+- The function returns `:retry` (or `{:retry, reason}`) to ask for another
+  attempt; any other value is treated as success and returned as-is.
 
 ## Start it under your supervisor
 
@@ -101,13 +100,13 @@ and the retry, circuit-breaker, and rate-limit logic is applied automatically.
 Inside the function you pass to `call/1`, you decide what counts as a retriable
 failure. There are two ways to ask for a retry:
 
-  1. return the atom `:retry`, or
-  2. return a tuple `{:retry, reason}`, where `reason` is any term (handy for
-     logging and telemetry).
+1. return the atom `:retry`, or
+2. return a tuple `{:retry, reason}`, where `reason` is any term (handy for
+   logging and telemetry).
 
 Any other return value is considered a success and is returned to the caller
 untouched — including the function's own `{:error, reason}` values. This is the
-key distinction: an `{:error, ...}` you return is *your* error and passes
+key distinction: an `{:error, ...}` you return is _your_ error and passes
 through; only `:retry`/`{:retry, reason}` drive the retry machinery.
 
 ```elixir
@@ -117,7 +116,7 @@ def fetch(id) do
       {:ok, %{status: 200, body: body}} -> {:ok, body}
       {:ok, %{status: status}} when status in 500..599 -> {:retry, status}
       {:ok, %{status: 404}} -> {:error, :not_found}   # not retried — your error
-      {:error, %HTTPError{}} = err -> err              # not retried — your error
+      {:error, %HTTPError{}} = err -> err             # not retried — your error
     end
   end
 end
@@ -158,14 +157,14 @@ full picture.
 
 ## Where to go next
 
-  * **[The module front door](the-front-door.md)** — everything `use
-    ExternalService` generates, plus supervision and per-environment overrides.
-  * **[Circuit breakers](circuit-breakers.md)** — how the breaker trips and
-    resets, and how to introspect it.
-  * **[Retries](retries.md)** — backoff strategies, jitter, attempt and time
-    budgets, and retrying on exceptions.
-  * **[Rate limiting](rate-limiting.md)** — staying under a service's quota.
-  * **[Error handling](error-handling.md)** — `call` vs `call!` and the
-    structured error types.
-  * **[Telemetry](telemetry.md)** — observing calls, retries, and breaker trips.
-  * **[Migrating to 2.0](migrating-to-2.0.md)** — upgrading from 1.x.
+- **[The module front door](the-front-door.md)** — everything `use
+ExternalService` generates, plus supervision and per-environment overrides.
+- **[Circuit breakers](circuit-breakers.md)** — how the breaker trips and
+  resets, and how to introspect it.
+- **[Retries](retries.md)** — backoff strategies, jitter, attempt and time
+  budgets, and retrying on exceptions.
+- **[Rate limiting](rate-limiting.md)** — staying under a service's quota.
+- **[Error handling](error-handling.md)** — `call` vs `call!` and the
+  structured error types.
+- **[Telemetry](telemetry.md)** — observing calls, retries, and breaker trips.
+- **[Migrating to 2.0](migrating-to-2.0.md)** — upgrading from 1.x.

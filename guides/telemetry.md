@@ -14,8 +14,8 @@ relates to.
 
 Emitted when a guarded call begins.
 
-  * **Measurements:** `:system_time`, `:monotonic_time`
-  * **Metadata:** `:service`
+- **Measurements:** `:system_time`, `:monotonic_time`
+- **Metadata:** `:service`
 
 ### `[:external_service, :call, :stop]`
 
@@ -23,16 +23,16 @@ Emitted when a guarded call completes — including when it completes with an er
 value such as `ExternalService.RetriesExhausted` or
 `ExternalService.CircuitBreakerOpen`.
 
-  * **Measurements:** `:duration`, `:monotonic_time`
-  * **Metadata:** `:service`, `:result` (the value returned from the call)
+- **Measurements:** `:duration`, `:monotonic_time`
+- **Metadata:** `:service`, `:result` (the value returned from the call)
 
 ### `[:external_service, :call, :exception]`
 
 Emitted when a guarded call raises — for example a non-retriable exception from
 your function, or `call!/3` raising on an open breaker or exhausted retries.
 
-  * **Measurements:** `:duration`, `:monotonic_time`
-  * **Metadata:** `:service`, `:kind`, `:reason`, `:stacktrace`
+- **Measurements:** `:duration`, `:monotonic_time`
+- **Metadata:** `:service`, `:kind`, `:reason`, `:stacktrace`
 
 ### `[:external_service, :call, :retry]`
 
@@ -40,23 +40,23 @@ Emitted each time a call's function fails in a way that melts the circuit breake
 (it returned `:retry` / `{:retry, reason}`, or it raised). Whether another
 attempt is actually made depends on the retry options.
 
-  * **Measurements:** `:count` (always `1`)
-  * **Metadata:** `:service`, `:reason`
+- **Measurements:** `:count` (always `1`)
+- **Metadata:** `:service`, `:reason`
 
 ### `[:external_service, :circuit_breaker, :blown]`
 
 Emitted when a call is rejected because the service's circuit breaker is open.
 
-  * **Measurements:** `:count` (always `1`)
-  * **Metadata:** `:service`
+- **Measurements:** `:count` (always `1`)
+- **Metadata:** `:service`
 
 ### `[:external_service, :rate_limit, :sleep]`
 
 Emitted when a call is throttled and put to sleep to stay within the configured
 rate limit.
 
-  * **Measurements:** `:sleep_time` (milliseconds)
-  * **Metadata:** `:service`
+- **Measurements:** `:sleep_time` (milliseconds)
+- **Metadata:** `:service`
 
 > #### Event names are a stable contract {: .info}
 >

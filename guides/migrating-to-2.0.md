@@ -10,24 +10,24 @@ The changes are real but the upgrade is mostly find-and-replace. Work through th
 sections below in order; each shows the 1.x form and its 2.0 replacement.
 
 > A complete, categorized list of changes is in the
-> [CHANGELOG](changelog.html). This guide focuses on *what you have to do* to
+> [CHANGELOG](changelog.html). This guide focuses on _what you have to do_ to
 > upgrade.
 
 ## At a glance
 
-| Area | 1.x | 2.0 |
-| --- | --- | --- |
-| Minimum Elixir | < 1.15 | `~> 1.15` |
-| Circuit breaker config | `fuse_strategy: {:standard, max, win}`, `fuse_refresh: ms` | `circuit_breaker: [tolerate:, within:, reset:]` |
-| Rate limit config | `rate_limit: {limit, win}` | `rate_limit: [limit:, per:]` |
-| Service identifier term | `fuse_name` | `service` |
-| Reset a breaker | `reset_fuse/1` | `reset/1` |
-| Retry backoff | `{:exponential, d}` / `{:linear, d, f}` | `backoff: :exponential\|:linear` + `base:`/`factor:` |
-| Retry on exceptions | `rescue_only: [...]` (retried `RuntimeError` by default) | `retry_on: [...]`, default `[]` |
-| Jitter | `randomize:` | `jitter:` |
-| Module gateway | `use ExternalService.Gateway` + `external_call/*` | `use ExternalService` + `call/*` |
-| Library errors (returned) | nested tuples | structured `Errata` structs |
-| Library errors (raised) | `*Error` modules | new structured modules |
+| Area                      | 1.x                                                        | 2.0                                                  |
+| ------------------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+| Minimum Elixir            | < 1.15                                                     | `~> 1.15`                                            |
+| Circuit breaker config    | `fuse_strategy: {:standard, max, win}`, `fuse_refresh: ms` | `circuit_breaker: [tolerate:, within:, reset:]`      |
+| Rate limit config         | `rate_limit: {limit, win}`                                 | `rate_limit: [limit:, per:]`                         |
+| Service identifier term   | `fuse_name`                                                | `service`                                            |
+| Reset a breaker           | `reset_fuse/1`                                             | `reset/1`                                            |
+| Retry backoff             | `{:exponential, d}` / `{:linear, d, f}`                    | `backoff: :exponential\|:linear` + `base:`/`factor:` |
+| Retry on exceptions       | `rescue_only: [...]` (retried `RuntimeError` by default)   | `retry_on: [...]`, default `[]`                      |
+| Jitter                    | `randomize:`                                               | `jitter:`                                            |
+| Module gateway            | `use ExternalService.Gateway` + `external_call/*`          | `use ExternalService` + `call/*`                     |
+| Library errors (returned) | nested tuples                                              | structured `Errata` structs                          |
+| Library errors (raised)   | `*Error` modules                                           | new structured modules                               |
 
 ## 1. Bump the minimum Elixir version
 
@@ -57,9 +57,9 @@ ExternalService.start(MyService,
 
 The mapping is direct:
 
-  * `fuse_strategy: {:standard, max, window}` → `circuit_breaker: [tolerate: max, within: window]`
-  * `fuse_refresh: ms` → `circuit_breaker: [reset: ms]`
-  * `rate_limit: {limit, window}` → `rate_limit: [limit: limit, per: window]`
+- `fuse_strategy: {:standard, max, window}` → `circuit_breaker: [tolerate: max, within: window]`
+- `fuse_refresh: ms` → `circuit_breaker: [reset: ms]`
+- `rate_limit: {limit, window}` → `rate_limit: [limit: limit, per: window]`
 
 For the `{:fault_injection, rate, max, window}` strategy, use
 `circuit_breaker: [fault_injection: rate, tolerate: max, within: window]`.
@@ -107,10 +107,10 @@ separate numeric fields, `randomize` became `jitter`, and `rescue_only` became
 
 Mapping:
 
-  * `backoff: {:exponential, delay}` → `backoff: :exponential, base: delay`
-  * `backoff: {:linear, delay, factor}` → `backoff: :linear, base: delay, factor: factor`
-  * `randomize: true` → `jitter: true` (a float still means that proportion)
-  * `rescue_only: mods` → `retry_on: mods`
+- `backoff: {:exponential, delay}` → `backoff: :exponential, base: delay`
+- `backoff: {:linear, delay, factor}` → `backoff: :linear, base: delay, factor: factor`
+- `randomize: true` → `jitter: true` (a float still means that proportion)
+- `rescue_only: mods` → `retry_on: mods`
 
 You can also now pass retry options as a plain keyword list to `call/3` /
 `call!/3` and to the `:retry` option, not only as a struct.
@@ -120,7 +120,7 @@ You can also now pass retry options as a plain keyword list to `call/3` /
 This is the one change that can alter runtime behavior rather than just syntax.
 In 1.x, `rescue_only` defaulted to `[RuntimeError]`, so any raised `RuntimeError`
 was retried automatically. In 2.0, **`retry_on` defaults to `[]`** — raised
-exceptions are *not* retried unless you opt in
+exceptions are _not_ retried unless you opt in
 ([issue #7](https://github.com/jvoegele/external_service/issues/7)).
 
 If you were relying on exceptions being retried, restore it explicitly:
@@ -137,16 +137,16 @@ signals a bug. See [Retries](retries.md).
 
 This is the largest source-level change. The library no longer returns nested
 error tuples or raises the old `*Error` modules. It returns (and raises)
-structured [Errata](https://hexdocs.pm/errata) error structs. The *same* struct
+structured [Errata](https://hexdocs.pm/errata) error structs. The _same_ struct
 is returned by `call/3` and raised by `call!/3`.
 
 ### Returned errors (`call/3`)
 
-| Before (1.x) | After (2.0) |
-| --- | --- |
+| Before (1.x)                             | After (2.0)                                                                              |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `{:error, {:retries_exhausted, reason}}` | `{:error, %ExternalService.RetriesExhausted{context: %{service: name, reason: reason}}}` |
-| `{:error, {:fuse_blown, name}}` | `{:error, %ExternalService.CircuitBreakerOpen{context: %{service: name}}}` |
-| `{:error, {:fuse_not_found, name}}` | `{:error, %ExternalService.ServiceNotStarted{context: %{service: name}}}` |
+| `{:error, {:fuse_blown, name}}`          | `{:error, %ExternalService.CircuitBreakerOpen{context: %{service: name}}}`               |
+| `{:error, {:fuse_not_found, name}}`      | `{:error, %ExternalService.ServiceNotStarted{context: %{service: name}}}`                |
 
 ```elixir
 # Before (1.x)
@@ -168,11 +168,11 @@ Note the retry `reason` now lives in `context.reason`.
 
 ### Raised errors (`call!/3`)
 
-| Before (1.x) | After (2.0) |
-| --- | --- |
-| `ExternalService.RetriesExhaustedError` | `ExternalService.RetriesExhausted` |
-| `ExternalService.FuseBlownError` | `ExternalService.CircuitBreakerOpen` |
-| `ExternalService.FuseNotFoundError` | `ExternalService.ServiceNotStarted` |
+| Before (1.x)                            | After (2.0)                          |
+| --------------------------------------- | ------------------------------------ |
+| `ExternalService.RetriesExhaustedError` | `ExternalService.RetriesExhausted`   |
+| `ExternalService.FuseBlownError`        | `ExternalService.CircuitBreakerOpen` |
+| `ExternalService.FuseNotFoundError`     | `ExternalService.ServiceNotStarted`  |
 
 ```elixir
 # Before (1.x)

@@ -1,12 +1,12 @@
 # Circuit Breakers
 
-The circuit breaker is what protects your application from a *persistently*
+The circuit breaker is what protects your application from a _persistently_
 failing dependency. Where retries handle the occasional blip, the breaker
 handles the outage: once a service fails too often, the breaker "opens" and
 further calls fail fast — immediately, without touching the struggling service —
 until it has had time to recover.
 
-This is the mechanism described in Michael Nygard's *Release It!* and popularized
+This is the mechanism described in Michael Nygard's _Release It!_ and popularized
 by Martin Fowler. `ExternalService` implements it on top of the Erlang
 [`:fuse`](https://github.com/jlouis/fuse) library, but you never call `:fuse`
 directly — the breaker is managed for you on every call.
@@ -14,7 +14,7 @@ directly — the breaker is managed for you on every call.
 ## Why fail fast?
 
 When a dependency is down and you keep calling it, every caller blocks on
-timeouts, work piles up, and the failure spreads — a *cascading* failure. The
+timeouts, work piles up, and the failure spreads — a _cascading_ failure. The
 breaker short-circuits that: after enough failures it stops you from even
 attempting the call, so callers get an immediate error they can handle (serve
 cached data, degrade gracefully, return 503) instead of hanging.
@@ -37,12 +37,12 @@ use ExternalService,
   ]
 ```
 
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `:tolerate` | `10` | Number of failures tolerated within the `:within` window before the breaker opens. |
-| `:within` | `10_000` | Length of the failure-counting window, in milliseconds. |
-| `:reset` | `60_000` | Milliseconds to wait before the breaker resets (closes) after opening. |
-| `:fault_injection` | — | If set to a rate between `0.0` and `1.0`, randomly fails that fraction of calls (for testing). |
+| Option             | Default  | Meaning                                                                                        |
+| ------------------ | -------- | ---------------------------------------------------------------------------------------------- |
+| `:tolerate`        | `10`     | Number of failures tolerated within the `:within` window before the breaker opens.             |
+| `:within`          | `10_000` | Length of the failure-counting window, in milliseconds.                                        |
+| `:reset`           | `60_000` | Milliseconds to wait before the breaker resets (closes) after opening.                         |
+| `:fault_injection` | —        | If set to a rate between `0.0` and `1.0`, randomly fails that fraction of calls (for testing). |
 
 So `tolerate: 5, within: 1_000` means "open the breaker once there are more than
 5 failures inside any 1-second window." After opening, the breaker stays open
@@ -57,13 +57,13 @@ get the defaults above.
 The breaker is "melted" — pushed one step toward opening — on every call attempt
 that fails, where a failure is:
 
-  * the function returns `:retry` or `{:retry, reason}`, or
-  * the function raises an exception.
+- the function returns `:retry` or `{:retry, reason}`, or
+- the function raises an exception.
 
 > #### Melt vs. retry {: .info}
 >
 > A failure melts the breaker **whether or not the call is retried**. The
-> `:retry_on` retry option governs whether a *raised exception* triggers another
+> `:retry_on` retry option governs whether a _raised exception_ triggers another
 > attempt; it does not change what melts the breaker. A raised exception that is
 > not retried still melts the breaker and then propagates to the caller.
 
@@ -75,10 +75,10 @@ successes as far as the breaker is concerned and do not melt it.
 A call made while the breaker is open does not invoke your function at all.
 Instead:
 
-  * `call/3` returns `{:error, %ExternalService.CircuitBreakerOpen{}}`,
-  * `call!/3` raises `ExternalService.CircuitBreakerOpen`, and
-  * an `[:external_service, :circuit_breaker, :blown]` telemetry event is
-    emitted.
+- `call/3` returns `{:error, %ExternalService.CircuitBreakerOpen{}}`,
+- `call!/3` raises `ExternalService.CircuitBreakerOpen`, and
+- an `[:external_service, :circuit_breaker, :blown]` telemetry event is
+  emitted.
 
 See [Error handling](error-handling.md) for how to deal with these.
 
@@ -103,17 +103,17 @@ ExternalService.reset(:payments)
 
 A few semantics worth knowing:
 
-  * **`available?/1`** is `true` only when the breaker is closed. A service that
-    was never started reports `false` — it is not "ready to use."
-  * **`blown?/1`** is the direct "is it open?" question. A service that was
-    never started is *not* reported as blown (there is no breaker to be open);
-    use `available?/1` when you want "ready to use" semantics.
-  * **`all_available?/1`** is `true` only if *every* listed service is
-    `available?/1` — handy for guarding work that depends on several services.
-  * Availability can change between the check and a subsequent call, so treat
-    these as best-effort signals, not guarantees. They let you bail out early;
-    they do not replace handling a `CircuitBreakerOpen` error from the call
-    itself.
+- **`available?/1`** is `true` only when the breaker is closed. A service that
+  was never started reports `false` — it is not "ready to use."
+- **`blown?/1`** is the direct "is it open?" question. A service that was
+  never started is _not_ reported as blown (there is no breaker to be open);
+  use `available?/1` when you want "ready to use" semantics.
+- **`all_available?/1`** is `true` only if _every_ listed service is
+  `available?/1` — handy for guarding work that depends on several services.
+- Availability can change between the check and a subsequent call, so treat
+  these as best-effort signals, not guarantees. They let you bail out early;
+  they do not replace handling a `CircuitBreakerOpen` error from the call
+  itself.
 
 `reset/1` forces the breaker closed immediately, discarding its recorded
 failures. It is mainly useful in tests and in operational tooling ("we fixed the
@@ -136,11 +136,11 @@ This is a testing aid — leave it unset in production.
 There is no universally correct setting; it depends on the service's normal
 error rate and how costly a false trip is. Some rules of thumb:
 
-  * Set `:tolerate`/`:within` so the breaker tolerates normal transient noise
-    but trips promptly on a real outage. Counting failures over a window (rather
-    than consecutively) makes it robust to interleaved success and failure.
-  * Set `:reset` to roughly how long you expect a recovering service to need. Too
-    short and you hammer a service that isn't ready; too long and you stay
-    degraded after it has recovered.
-  * Remember the breaker is global to the service. Size it for aggregate traffic,
-    not a single caller.
+- Set `:tolerate`/`:within` so the breaker tolerates normal transient noise
+  but trips promptly on a real outage. Counting failures over a window (rather
+  than consecutively) makes it robust to interleaved success and failure.
+- Set `:reset` to roughly how long you expect a recovering service to need. Too
+  short and you hammer a service that isn't ready; too long and you stay
+  degraded after it has recovered.
+- Remember the breaker is global to the service. Size it for aggregate traffic,
+  not a single caller.

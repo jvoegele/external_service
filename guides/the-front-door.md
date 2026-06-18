@@ -33,7 +33,7 @@ end
 The options are exactly those accepted by `ExternalService.start/2`
 (`:circuit_breaker`, `:rate_limit`, `:retry`, `:sleep_function`), plus:
 
-  * `:name` — the term that identifies the service. Defaults to the module name.
+- `:name` — the term that identifies the service. Defaults to the module name.
 
 You rarely need `:name`; the module name is a perfectly good service identifier
 and keeps things unambiguous.
@@ -79,16 +79,16 @@ above keeps the `:within` and `:reset` from the module and only changes
 
 `use ExternalService` generates the following functions on your module:
 
-| Function | Delegates to | Purpose |
-| --- | --- | --- |
-| `call/1`, `call/2` | `ExternalService.call/2,3` | Synchronous guarded call. |
-| `call!/1`, `call!/2` | `ExternalService.call!/2,3` | Like `call`, but raises on failure. |
-| `call_async/1`, `call_async/2` | `ExternalService.call_async/2,3` | Returns a `Task`. |
-| `call_async_stream/2,3,4` | `ExternalService.call_async_stream/3,4,5` | Parallel, streaming calls. |
-| `available?/0` | `ExternalService.available?/1` | Is the breaker closed? |
-| `blown?/0` | `ExternalService.blown?/1` | Is the breaker open? |
-| `reset/0` | `ExternalService.reset/1` | Force the breaker closed. |
-| `child_spec/1`, `start_link/1` | — | Supervision integration. |
+| Function                       | Delegates to                              | Purpose                             |
+| ------------------------------ | ----------------------------------------- | ----------------------------------- |
+| `call/1`, `call/2`             | `ExternalService.call/2,3`                | Synchronous guarded call.           |
+| `call!/1`, `call!/2`           | `ExternalService.call!/2,3`               | Like `call`, but raises on failure. |
+| `call_async/1`, `call_async/2` | `ExternalService.call_async/2,3`          | Returns a `Task`.                   |
+| `call_async_stream/2,3,4`      | `ExternalService.call_async_stream/3,4,5` | Parallel, streaming calls.          |
+| `available?/0`                 | `ExternalService.available?/1`            | Is the breaker closed?              |
+| `blown?/0`                     | `ExternalService.blown?/1`                | Is the breaker open?                |
+| `reset/0`                      | `ExternalService.reset/1`                 | Force the breaker closed.           |
+| `child_spec/1`, `start_link/1` | —                                         | Supervision integration.            |
 
 The one- and two-argument `call` forms differ only in whether you pass retry
 options explicitly:
