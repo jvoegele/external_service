@@ -1,0 +1,189 @@
+# ExternalService Cheatsheet
+
+Quick recipes for configuring and calling services. See the guides for full
+detail.
+
+## Define a service
+{: .col-2}
+
+### Module front door (recommended)
+
+```elixir
+defmodule MyApp.Api do
+  use ExternalService,
+    circuit_breaker: [tolerate: 5, within: :timer.seconds(1), reset: :timer.seconds(5)],
+    rate_limit: [limit: 100, per: :timer.seconds(1)],
+    retry: [max_attempts: 5, backoff: :exponential, jitter: true]
+
+  def fetch(id), do: call(fn -> HTTP.get("/things/#{id}") end)
+end
+```
+
+Start it under a supervisor:
+
+```elixir
+children = [MyApp.Api]
+Supervisor.start_link(children, strategy: :one_for_one)
+```
+
+### Functional API
+
+```elixir
+ExternalService.start(:payments,
+  circuit_breaker: [tolerate: 5, within: 1_000, reset: 5_000],
+  retry: [max_attempts: 3]
+)
+
+ExternalService.call(:payments, fn -> charge() end)
+```
+
+## Calling
+{: .col-2}
+
+### Synchronous
+
+```elixir
+MyApp.Api.call(fn -> work() end)
+MyApp.Api.call([max_attempts: 2], fn -> work() end)  # per-call retry opts
+MyApp.Api.call!(fn -> work() end)                     # raises on failure
+```
+
+### Async / parallel
+
+```elixir
+task = MyApp.Api.call_async(fn -> work() end)
+Task.await(task)
+
+ids
+|> MyApp.Api.call_async_stream(fn id -> fetch(id) end)
+|> Enum.to_list()
+```
+
+## Triggering retries
+{: .col-2}
+
+### Return values
+
+```elixir
+call fn ->
+  case HTTP.get(url) do
+    {:ok, %{status: 200} = r}            -> {:ok, r}
+    {:ok, %{status: s}} when s in 500..599 -> {:retry, s}  # retry
+    {:ok, %{status: 429}}                -> :retry          # retry
+    other                                -> other           # success
+  end
+end
+```
+
+### Key rule
+
+| Return | Effect |
+| --- | --- |
+| `:retry` | retry |
+| `{:retry, reason}` | retry (reason recorded) |
+| anything else | success, returned as-is |
+| raised exception | propagates (retried only if in `:retry_on`) |
+
+## Circuit breaker config
+{: .col-2}
+
+### Options
+
+```elixir
+circuit_breaker: [
+  tolerate: 5,                # failures per window (default 10)
+  within: :timer.seconds(1),  # window ms (default 10_000)
+  reset: :timer.seconds(5)    # ms open before reset (default 60_000)
+]
+```
+
+### Introspect & reset
+
+```elixir
+MyApp.Api.available?()   # breaker closed?
+MyApp.Api.blown?()       # breaker open?
+MyApp.Api.reset()        # force closed
+
+ExternalService.all_available?([:a, :b])
+```
+
+## Retry options
+{: .col-2}
+
+### All options
+
+```elixir
+retry: [
+  backoff: :exponential,   # or :linear
+  base: 100,               # initial delay ms (default 10)
+  factor: 1,               # :linear growth factor
+  cap: :timer.seconds(2),  # max single delay
+  max_attempts: 5,         # attempt count bound
+  expiry: :timer.seconds(10), # time budget ms
+  jitter: true,            # ±10%, or a float proportion
+  retry_on: []             # exception modules to retry
+]
+```
+
+### Recipes
+
+```elixir
+# Fast, bounded
+retry: [max_attempts: 3, backoff: :linear, base: 50]
+
+# Resilient HTTP default
+retry: [backoff: :exponential, base: 100, cap: 2_000,
+        max_attempts: 5, jitter: true]
+
+# Retry a transient exception
+retry: [retry_on: [MyApp.TransientError]]
+```
+
+## Error handling
+{: .col-2}
+
+### Returned by `call`
+
+```elixir
+case MyApp.Api.fetch(id) do
+  {:ok, v} -> v
+  {:error, %ExternalService.RetriesExhausted{}} -> degrade()
+  {:error, %ExternalService.CircuitBreakerOpen{}} -> degrade()
+  {:error, reason} -> {:error, reason}  # your own error
+end
+```
+
+### Raised by `call!`
+
+```elixir
+rescue
+  e in [ExternalService.RetriesExhausted,
+        ExternalService.CircuitBreakerOpen] ->
+    send_resp(conn, 503, "")
+```
+
+## Telemetry events
+{: .col-2}
+
+### Events
+
+```text
+[:external_service, :call, :start]
+[:external_service, :call, :stop]
+[:external_service, :call, :exception]
+[:external_service, :call, :retry]
+[:external_service, :circuit_breaker, :blown]
+[:external_service, :rate_limit, :sleep]
+```
+
+### Attach
+
+```elixir
+:telemetry.attach_many(
+  "es-handler",
+  [[:external_service, :call, :retry],
+   [:external_service, :circuit_breaker, :blown]],
+  &MyApp.Telemetry.handle/4,
+  nil
+)
+```

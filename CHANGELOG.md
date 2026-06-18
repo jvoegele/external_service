@@ -8,9 +8,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 Work toward 2.0 (see `ROADMAP.md`). The 2.0 line modernizes the project and
-introduces breaking changes; a migration guide will accompany the release.
+introduces breaking changes. See the
+[migration guide](guides/migrating-to-2.0.md) for a step-by-step upgrade from
+1.x.
 
 ### Added
+- Documentation overhaul: a set of guides (Getting Started, the module front
+  door, circuit breakers, retries, rate limiting, error handling, telemetry), a
+  cheatsheet, and a step-by-step [migration guide](guides/migrating-to-2.0.md),
+  all published on HexDocs.
 - Introspection for circuit breaker state ([issue #5](https://github.com/jvoegele/external_service/issues/5)):
   `ExternalService.available?/1`, `ExternalService.blown?/1`, and
   `ExternalService.all_available?/1`, plus `available?/0` and `blown?/0` on
@@ -53,8 +59,8 @@ introduces breaking changes; a migration guide will accompany the release.
   | raise `ExternalService.FuseNotFoundError` | raise `ExternalService.ServiceNotStarted` |
 
   Results returned directly by the wrapped function (including its own
-  `{:error, reason}` values) are unchanged. A full migration guide will ship with
-  2.0.
+  `{:error, reason}` values) are unchanged. See the
+  [migration guide](guides/migrating-to-2.0.md) for the full mapping.
 - **Configuration and terminology overhauled** to drop the leaked "fuse" wording:
   - `start/2` now takes `circuit_breaker: [tolerate:, within:, reset:, fault_injection:]`
     and `rate_limit: [limit:, per:]` (and an optional `retry:`) instead of
