@@ -98,10 +98,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Run Dialyzer on the project's pinned toolchain (keep in sync with
+      # .tool-versions) so CI matches local development and catches
+      # toolchain-specific analysis issues, such as dialyxir/OTP version skew.
       - uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.18.4"
-          otp-version: "27.2"
+          elixir-version: "1.20.0"
+          otp-version: "29.0.1"
 
       - name: Cache deps and build
         uses: actions/cache@v4
@@ -119,9 +122,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: priv/plts
-          key: ${{ runner.os }}-plt-1.18.4-27.2-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-plt-1.20.0-29.0.1-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-plt-1.18.4-27.2-
+            ${{ runner.os }}-plt-1.20.0-29.0.1-
 
       - run: mix deps.get
       - run: mix dialyzer --plt
