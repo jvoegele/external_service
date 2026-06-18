@@ -148,6 +148,20 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == 1
     end
 
+    test "an exception not listed in retry_on does not melt the circuit breaker" do
+      retry_opts = %{@retry_opts | retry_on: [ArgumentError]}
+
+      # Raise far more times than the breaker would tolerate; because the
+      # exception is not retriable, none of these should count as a failure.
+      for _ <- 1..(@fuse_retries * 3) do
+        assert_raise(RuntimeError, fn ->
+          ExternalService.call(@fuse_name, retry_opts, fn -> raise "KABOOM!" end)
+        end)
+      end
+
+      assert ExternalService.available?(@fuse_name)
+    end
+
     test "returns CircuitBreakerOpen when the fuse is blown by retries" do
       res =
         ExternalService.call(@fuse_name, @retry_opts, fn ->
@@ -235,6 +249,57 @@ defmodule ExternalServiceTest do
 
       assert Process.get(:sleep_fired) == true
       assert Process.get(:call_count) == 5
+    end
+  end
+
+  describe "per-call retry options" do
+    setup do
+      Process.put(@fuse_name, 0)
+
+      # Configure a distinctive default so we can tell merge from replace.
+      ExternalService.start(@fuse_name,
+        circuit_breaker: [tolerate: 50, within: 10_000],
+        retry: [backoff: :linear, base: 0, max_attempts: 2]
+      )
+    end
+
+    defp count_retries(opts) do
+      ExternalService.call(@fuse_name, opts, fn ->
+        Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+        :retry
+      end)
+
+      Process.get(@fuse_name)
+    end
+
+    test "call/2 uses the service's configured retry defaults" do
+      ExternalService.call(@fuse_name, fn ->
+        Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+        :retry
+      end)
+
+      assert Process.get(@fuse_name) == 2
+    end
+
+    test "a keyword override leaves unspecified keys at the service default" do
+      # Overriding an unrelated key must NOT reset max_attempts back to its
+      # library default of `nil` (unbounded) — it stays at the service's 2.
+      assert count_retries(jitter: true) == 2
+    end
+
+    test "a keyword override changes only the keys it lists" do
+      assert count_retries(max_attempts: 4) == 4
+    end
+
+    test "a RetryOptions struct replaces the service defaults entirely" do
+      # The struct omits max_attempts, so retries are bounded only by the breaker
+      # (tolerate: 50), proving the service's max_attempts: 2 was discarded.
+      ExternalService.call(@fuse_name, %RetryOptions{backoff: :linear, base: 0}, fn ->
+        Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+        :retry
+      end)
+
+      assert Process.get(@fuse_name) > 2
     end
   end
 

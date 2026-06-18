@@ -58,14 +58,20 @@ The breaker is "melted" — pushed one step toward opening — on every call att
 that fails, where a failure is:
 
 - the function returns `:retry` or `{:retry, reason}`, or
-- the function raises an exception.
+- the function raises an exception whose type is listed in the `:retry_on` retry
+  option.
 
-> #### Melt vs. retry {: .info}
+> #### Melt and retry go together for exceptions {: .info}
 >
-> A failure melts the breaker **whether or not the call is retried**. The
-> `:retry_on` retry option governs whether a _raised exception_ triggers another
-> attempt; it does not change what melts the breaker. A raised exception that is
-> not retried still melts the breaker and then propagates to the caller.
+> The `:retry_on` retry option governs **both** whether a raised exception is
+> retried **and** whether it melts the breaker. An exception whose type is in
+> `:retry_on` is retried and melts the breaker; an exception that is *not* in
+> `:retry_on` is neither retried nor melted — it propagates to the caller and
+> leaves the breaker untouched.
+>
+> Explicit `:retry` / `{:retry, reason}` return values always melt the breaker;
+> they are the protocol for asking for another attempt, so `:retry_on` does not
+> apply to them.
 
 Values your function simply returns — including its own `{:error, reason}` — are
 successes as far as the breaker is concerned and do not melt it.

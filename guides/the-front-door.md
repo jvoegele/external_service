@@ -97,11 +97,14 @@ options explicitly:
 # Uses the module's default :retry options
 call fn -> do_work() end
 
-# Overrides them for this call only
-call [max_attempts: 2, backoff: :linear, base: 50], fn -> do_work() end
+# Overrides just :max_attempts for this call, merged onto the module's defaults
+call [max_attempts: 2], fn -> do_work() end
 ```
 
-See the [Retries](retries.md) guide for what the override keyword list accepts.
+A per-call keyword list is **merged** onto the module's `:retry` defaults — it
+changes only the keys it lists and inherits the rest. (A `%RetryOptions{}` struct
+replaces them entirely.) See the [Retries](retries.md) guide for the full list of
+keys and the merge-vs-replace rule.
 
 ## Introspection
 

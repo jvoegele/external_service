@@ -34,14 +34,10 @@ defmodule ExternalService.Gateway do
       def call_service(p), do: call(fn -> ... end)
   """
 
+  @deprecated "Use `use ExternalService` instead"
   @doc false
   defmacro __using__(opts) do
     quote bind_quoted: [opts: opts] do
-      IO.warn(
-        "use ExternalService.Gateway is deprecated; use `use ExternalService` instead",
-        Macro.Env.stacktrace(__ENV__)
-      )
-
       use ExternalService, opts
 
       @doc false

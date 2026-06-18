@@ -92,8 +92,8 @@ defmodule ExternalService.FrontDoorTest do
       assert Service.available?()
       refute Service.blown?()
 
-      # No max_attempts so the breaker is driven past its tolerance of 3.
-      Service.call([backoff: :linear, base: 0], fn -> :retry end)
+      # Allow more attempts than the breaker tolerates (3) so it is driven open.
+      Service.call([max_attempts: 10], fn -> :retry end)
 
       assert Service.blown?()
       refute Service.available?()

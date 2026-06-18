@@ -53,6 +53,19 @@ call %ExternalService.RetryOptions{max_attempts: 2}, fn -> work() end
 When you use the two-argument `call/2` (no options), the service's default
 `:retry` options apply.
 
+> #### Per-call keyword lists merge; structs replace {: .info}
+>
+> A per-call **keyword list** is treated as a set of *overrides*: it is merged
+> onto the service's configured `:retry` defaults, changing only the keys you
+> list and inheriting the rest. So if a service is configured with
+> `retry: [backoff: :exponential, base: 100, max_attempts: 5]`, then
+> `call([max_attempts: 2], fun)` runs with `backoff: :exponential, base: 100,
+> max_attempts: 2`.
+>
+> A per-call **`%RetryOptions{}` struct**, by contrast, is already a complete set
+> of options, so it *replaces* the service defaults wholesale — any field you
+> don't set takes the library default, not the service's value.
+
 ### The options
 
 | Option          | Default        | Meaning                                                                                      |
@@ -90,8 +103,9 @@ retry: [backoff: :linear, base: 100, factor: 1]
 
 ## Bounding retries
 
-Left unbounded, retries continue indefinitely (until the circuit breaker opens).
-You almost always want a bound. There are two, and they compose:
+By default there is **no** `:max_attempts`, `:expiry`, or `:cap`, so returning
+`:retry` repeatedly keeps retrying with an ever-growing delay. You almost always
+want an explicit bound. There are two, and they compose:
 
 - **`:max_attempts`** — a count. `max_attempts: 5` means at most five attempts
   total (the first try plus four retries).
@@ -106,6 +120,17 @@ the bound is hit without success, `call/3` returns
 # Stop after 5 attempts OR 5 seconds, whichever comes first.
 retry: [max_attempts: 5, expiry: :timer.seconds(5), backoff: :exponential, base: 100]
 ```
+
+> #### Don't rely on the circuit breaker to bound retries {: .warning}
+>
+> The breaker is a backstop, not a retry bound. With no `:max_attempts`/`:expiry`,
+> retries stop only when the breaker opens — and that is not guaranteed. The
+> breaker opens after `:tolerate` failures *within* its `:within` window, but
+> exponential backoff keeps widening the gap between attempts. Once the delay
+> grows past the window, failures stop accumulating fast enough to trip the
+> breaker, and retries can continue far longer than you'd expect (in pathological
+> configs, effectively forever). Always set an explicit `:max_attempts` or
+> `:expiry` — and a `:cap`, below — for unattended retries.
 
 ## Capping the delay
 
@@ -145,7 +170,9 @@ retry: [retry_on: [MyApp.TransientError, DBConnection.ConnectionError]]
 ```
 
 Now a raised `MyApp.TransientError` triggers a retry just like a `:retry` return
-value would; exceptions not in the list still propagate.
+value would, and it melts the circuit breaker. Exceptions not in the list still
+propagate untouched and leave the breaker alone — `:retry_on` governs both
+retrying and whether a raised exception counts against the breaker.
 
 > #### Prefer return values over exceptions {: .tip}
 >

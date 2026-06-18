@@ -35,9 +35,11 @@ defmodule ExternalService do
       * Metadata: `:service`, `:kind`, `:reason`, `:stacktrace`
 
     * `[:external_service, :call, :retry]` - emitted each time a call's function
-      fails in a way that melts the circuit breaker (it returned `:retry` /
-      `{:retry, reason}` or raised). Whether another attempt is actually made
-      depends on the retry options.
+      fails in a way that melts the circuit breaker: it returned `:retry` /
+      `{:retry, reason}`, or it raised an exception listed in the `:retry_on`
+      retry option. Exceptions not listed in `:retry_on` neither melt the breaker
+      nor emit this event. Whether another attempt is actually made depends on the
+      retry options.
       * Measurements: `:count` (always `1`)
       * Metadata: `:service`, `:reason`
 
@@ -318,11 +320,16 @@ defmodule ExternalService do
   the function will be returned as the result of `call`.
 
   Raised exceptions are only retried if their type is listed in the `:retry_on` retry option
-  (which defaults to `[]`); otherwise they propagate to the caller.
+  (which defaults to `[]`); otherwise they propagate to the caller untouched. An exception that is
+  not retried also does *not* melt the circuit breaker — `:retry_on` governs both retrying and
+  whether a raised exception counts as a circuit-breaker failure.
 
   `retry_opts` may be a `t:ExternalService.RetryOptions.t/0` struct or a keyword list of retry
-  options. When omitted (the two-argument form `call/2`), the default retry options configured for
-  the service via `start/2` are used.
+  options. A keyword list is treated as per-call *overrides*: it is merged onto the service's
+  configured default retry options (from `start/2`), so it overrides only the keys it lists and
+  inherits the rest. A `RetryOptions` struct, being a complete set of options, replaces the
+  service defaults entirely. When omitted (the two-argument form `call/2`), the service's
+  configured defaults are used.
   """
   @spec call(service(), retriable_function()) :: error | (function_result :: any)
   def call(service, function) when is_function(function) do
@@ -332,7 +339,7 @@ defmodule ExternalService do
   @spec call(service(), RetryOptions.t() | keyword(), retriable_function()) ::
           error | (function_result :: any)
   def call(service, retry_opts, function) do
-    retry_opts = RetryOptions.new(retry_opts)
+    retry_opts = resolve_retry_options(service, retry_opts)
 
     call_span(service, fn ->
       case call_with_retry(service, retry_opts, function) do
@@ -356,7 +363,7 @@ defmodule ExternalService do
   @spec call!(service(), RetryOptions.t() | keyword(), retriable_function()) ::
           function_result :: any | no_return
   def call!(service, retry_opts, function) do
-    retry_opts = RetryOptions.new(retry_opts)
+    retry_opts = resolve_retry_options(service, retry_opts)
 
     call_span(service, fn ->
       case call_with_retry(service, retry_opts, function) do
@@ -375,6 +382,15 @@ defmodule ExternalService do
       _ -> %RetryOptions{}
     end
   end
+
+  # A `%RetryOptions{}` struct is a complete set of options and is used as-is. A
+  # keyword list is treated as per-call *overrides*, merged onto the service's
+  # configured default retry options so that, e.g., `call([max_attempts: 2], fun)`
+  # tweaks only `:max_attempts` and inherits the rest of the service's config.
+  defp resolve_retry_options(_service, %RetryOptions{} = retry_opts), do: retry_opts
+
+  defp resolve_retry_options(service, retry_opts) when is_list(retry_opts),
+    do: RetryOptions.merge(service_retry_options(service), retry_opts)
 
   @doc """
   Asynchronous version of `ExternalService.call`.
@@ -461,7 +477,7 @@ defmodule ExternalService do
     Retry.retry with: apply_retry_options(retry_opts), rescue_only: retry_opts.retry_on do
       case Fuse.ask(service, :sync) do
         :ok ->
-          try_function(service, function)
+          try_function(service, retry_opts.retry_on, function)
 
         :blown ->
           emit_blown(service)
@@ -522,9 +538,9 @@ defmodule ExternalService do
        when is_integer(max_attempts) and max_attempts > 0,
        do: Stream.take(stream, max_attempts - 1)
 
-  @spec try_function(service, retriable_function) ::
+  @spec try_function(service, [module()], retriable_function) ::
           {:error, {:retry, any}} | {:error, :retry} | {:no_retry, any} | no_return
-  defp try_function(service, function) do
+  defp try_function(service, retry_on, function) do
     rate_limit = State.get(service).rate_limit
 
     case RateLimit.call(rate_limit, function) do
@@ -543,9 +559,22 @@ defmodule ExternalService do
     end
   rescue
     error ->
-      emit_retry(service, error)
-      Fuse.melt(service)
+      # A raised exception only counts as a failure (melting the circuit breaker)
+      # when it is one we would retry on. Exceptions not listed in `:retry_on`
+      # propagate untouched and leave the breaker alone — `:retry_on` governs both
+      # retrying and melting.
+      if retriable_exception?(error, retry_on) do
+        emit_retry(service, error)
+        Fuse.melt(service)
+      end
+
       reraise error, __STACKTRACE__
+  end
+
+  # Mirrors the matching done by `Retry.retry`'s `:rescue_only`: an exception is
+  # retriable when its struct is one of the modules listed in `:retry_on`.
+  defp retriable_exception?(error, retry_on) do
+    Enum.any?(retry_on, fn module -> is_struct(error, module) end)
   end
 
   defp retries_exhausted(service, reason) do
