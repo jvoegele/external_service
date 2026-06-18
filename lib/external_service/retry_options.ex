@@ -90,4 +90,24 @@ defmodule ExternalService.RetryOptions do
     validated = NimbleOptions.validate!(opts, @validated_schema)
     struct(__MODULE__, validated)
   end
+
+  @doc """
+  Layers a keyword list of per-call overrides onto a `base` struct.
+
+  Only the keys actually present in `opts` are overridden; every other field is
+  taken from `base`. This is how per-call retry options tweak — rather than
+  reset — a service's configured defaults. A `%RetryOptions{}` given in place of
+  the keyword list replaces `base` wholesale, since a struct is already a
+  complete set of options.
+
+  Raises `NimbleOptions.ValidationError` if `opts` is invalid.
+  """
+  @spec merge(t(), t() | keyword()) :: t()
+  def merge(_base, %__MODULE__{} = retry_options), do: retry_options
+
+  def merge(%__MODULE__{} = base, opts) when is_list(opts) do
+    validated = NimbleOptions.validate!(opts, @validated_schema)
+    overrides = Keyword.take(validated, Keyword.keys(opts))
+    struct(base, overrides)
+  end
 end

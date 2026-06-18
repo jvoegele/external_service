@@ -81,7 +81,11 @@ introduces breaking changes. See the
     the breaker (it propagates untouched), so a raised exception counts as a
     circuit-breaker failure only when its type is in `:retry_on`. Explicit
     `:retry` / `{:retry, reason}` return values always melt the breaker.
-  - `call/3` and `call!/3` now also accept a keyword list of retry options.
+  - `call/3` and `call!/3` now also accept a keyword list of retry options. A
+    keyword list is treated as per-call *overrides*: it is merged onto the
+    service's configured `:retry` defaults (overriding only the keys it lists and
+    inheriting the rest). A `%RetryOptions{}` struct still replaces the defaults
+    entirely.
 - `use ExternalService.Gateway` is **deprecated** in favor of `use ExternalService`.
   It still works (emitting a deprecation warning) and keeps the `external_call/*`
   and `reset_fuse/0` names as aliases, but uses the same new option shape as
@@ -99,6 +103,10 @@ introduces breaking changes. See the
   every gateway silently ran on the default circuit-breaker configuration.
 - Added a regression test for the `:fault_injection` strategy (issue #4); the
   `:fuse_monitor` crash no longer reproduces on fuse 2.5.
+- Rate limiting now works for a service whose name is any term, not only an atom
+  or binary. The rate-limit bucket name is now derived with `inspect/1`;
+  previously it used `Module.concat/2`, which raised for names such as tuples
+  (circuit breaker and retries already accepted any term).
 
 ### Changed
 - Raise the minimum Elixir requirement to `~> 1.15`.

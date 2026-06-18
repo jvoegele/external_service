@@ -325,8 +325,11 @@ defmodule ExternalService do
   whether a raised exception counts as a circuit-breaker failure.
 
   `retry_opts` may be a `t:ExternalService.RetryOptions.t/0` struct or a keyword list of retry
-  options. When omitted (the two-argument form `call/2`), the default retry options configured for
-  the service via `start/2` are used.
+  options. A keyword list is treated as per-call *overrides*: it is merged onto the service's
+  configured default retry options (from `start/2`), so it overrides only the keys it lists and
+  inherits the rest. A `RetryOptions` struct, being a complete set of options, replaces the
+  service defaults entirely. When omitted (the two-argument form `call/2`), the service's
+  configured defaults are used.
   """
   @spec call(service(), retriable_function()) :: error | (function_result :: any)
   def call(service, function) when is_function(function) do
@@ -336,7 +339,7 @@ defmodule ExternalService do
   @spec call(service(), RetryOptions.t() | keyword(), retriable_function()) ::
           error | (function_result :: any)
   def call(service, retry_opts, function) do
-    retry_opts = RetryOptions.new(retry_opts)
+    retry_opts = resolve_retry_options(service, retry_opts)
 
     call_span(service, fn ->
       case call_with_retry(service, retry_opts, function) do
@@ -360,7 +363,7 @@ defmodule ExternalService do
   @spec call!(service(), RetryOptions.t() | keyword(), retriable_function()) ::
           function_result :: any | no_return
   def call!(service, retry_opts, function) do
-    retry_opts = RetryOptions.new(retry_opts)
+    retry_opts = resolve_retry_options(service, retry_opts)
 
     call_span(service, fn ->
       case call_with_retry(service, retry_opts, function) do
@@ -379,6 +382,15 @@ defmodule ExternalService do
       _ -> %RetryOptions{}
     end
   end
+
+  # A `%RetryOptions{}` struct is a complete set of options and is used as-is. A
+  # keyword list is treated as per-call *overrides*, merged onto the service's
+  # configured default retry options so that, e.g., `call([max_attempts: 2], fun)`
+  # tweaks only `:max_attempts` and inherits the rest of the service's config.
+  defp resolve_retry_options(_service, %RetryOptions{} = retry_opts), do: retry_opts
+
+  defp resolve_retry_options(service, retry_opts) when is_list(retry_opts),
+    do: RetryOptions.merge(service_retry_options(service), retry_opts)
 
   @doc """
   Asynchronous version of `ExternalService.call`.

@@ -64,6 +64,16 @@ ids
 |> Enum.to_list()
 ```
 
+> #### Throttling has no timeout {: .warning}
+>
+> A throttled call sleeps and retries the bucket until there is room — there is
+> **no upper bound** on how long it waits. If callers are producing work faster
+> than the limit allows, the backlog grows and individual calls can block for a
+> long time. Rate limiting paces calls; it does not shed load. On latency- or
+> demand-sensitive paths, keep an eye on the `:rate_limit, :sleep` telemetry
+> (below) and, if needed, run the work through `call_async_stream/2` (so a pool
+> of tasks absorbs the wait) or apply your own back-pressure upstream.
+
 ## Customizing the sleep
 
 By default sleeping uses `Process.sleep/1`. In tests — where you don't want real

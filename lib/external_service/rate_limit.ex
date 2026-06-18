@@ -81,9 +81,13 @@ defmodule ExternalService.RateLimit do
 
   def call(%__MODULE__{}, function, _sleep_count) when is_function(function), do: function.()
 
-  @spec bucket_name(atom) :: String.t()
-  def bucket_name(root_fuse_name),
-    do: to_string(Module.concat(root_fuse_name, __MODULE__))
+  # The bucket name must be a string and unique per service. `inspect/1` yields a
+  # stable, unique string for any term, so rate limiting works for any service
+  # name — not only atoms (a plain `Module.concat/2` would reject tuple or other
+  # non-atom names, even though service names may be any term).
+  @spec bucket_name(ExternalService.service()) :: String.t()
+  def bucket_name(service),
+    do: "#{inspect(__MODULE__)}/#{inspect(service)}"
 
   defp sleep_time(%__MODULE__{limit: limit, time_window: window}),
     do: trunc(Float.ceil(window / limit))

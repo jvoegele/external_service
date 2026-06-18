@@ -117,3 +117,12 @@ such an exception retried, add its module to the `:retry_on` retry option (see
 [Retries](retries.md)). If you want it returned rather than raised, catch it
 inside your function and return an `{:error, reason}` (or `{:retry, reason}`)
 value.
+
+This matters especially for the async variants. `call_async/1` runs your function
+in a linked `Task`, so an exception that propagates out of it crashes the task —
+`Task.await/2` then re-raises it in the caller, and the link can take the caller
+down if you don't await. In `call_async_stream/2`, an exception raised for one
+element exits that task and, by default, propagates out of the stream. So for
+background and bulk work, prefer returning `{:error, reason}` / `{:retry, reason}`
+values (or listing the exception in `:retry_on`) over letting exceptions escape,
+so one bad element can't crash the batch.
