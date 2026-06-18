@@ -135,13 +135,15 @@ MyApp.Stripe.reset()
       paths (the `use ExternalService.Gateway` compile-time warning is the only
       one; functional-API renames are clean breaks with clear validation errors).
 - [x] Bump version to `2.0.0-rc.1` and stamp the CHANGELOG.
-- [ ] Tag, publish `2.0.0-rc.1` to Hex, gather feedback, then bump to `2.0.0`.
+- [x] Tag and publish `2.0.0-rc.1` to Hex
+      ([package](https://hex.pm/packages/external_service/2.0.0-rc.1)).
+- [ ] Gather RC feedback, then release `2.0.0` (final) (#25).
 
 ## Deferred to 2.1+
 - Pluggable rate-limit backend (issue #12) and circuit-breaker/state backend for
   distributed Elixir (issue #13) — behind a `backend:` adapter contract.
 - **Public `ExternalService.CircuitBreaker` / `ExternalService.RateLimiter`
-  modules.** Decided (pre-2.0-rc) *not* to expose the breaker/limiter as
+  modules** (#26). Decided (pre-2.0-rc) *not* to expose the breaker/limiter as
   standalone, user-facing control modules in 2.0, and to revisit in 2.1 as part
   of the backend work above. Rationale:
   - Today they are thin shells over `:fuse` / `ex_rated`; exposing them would
@@ -158,5 +160,5 @@ MyApp.Stripe.reset()
     internal `ExternalService.RateLimit` would rename accordingly). A rate-limit
     *read* helper on the `ExternalService` facade (symmetric with `available?`)
     is the lightweight option if demand appears sooner.
-- `Flow`-based `call_async_stream` option (TODO).
-- Decorator-based annotations for marking external calls (TODO).
+- `Flow`-based `call_async_stream` option (#27).
+- Decorator-based annotations for marking external calls (#28).
