@@ -82,6 +82,7 @@ defmodule ExternalService.Mixfile do
         "guides/rate-limiting.md",
         "guides/error-handling.md",
         "guides/telemetry.md",
+        "guides/flow.md",
         "guides/cheatsheet.cheatmd",
         "guides/migrating-to-2.0.md",
         "guides/about.md",
@@ -97,7 +98,8 @@ defmodule ExternalService.Mixfile do
           "guides/retries.md",
           "guides/rate-limiting.md",
           "guides/error-handling.md",
-          "guides/telemetry.md"
+          "guides/telemetry.md",
+          "guides/flow.md"
         ],
         Reference: [
           "guides/cheatsheet.cheatmd",

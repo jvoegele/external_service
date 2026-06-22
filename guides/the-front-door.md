@@ -210,7 +210,8 @@ orders
 ```
 
 It requires adding `:flow` to your deps. For a simple ordered parallel map,
-`call_async_stream/2` is still the right tool. See `ExternalService.Flow`.
+`call_async_stream/2` is still the right tool. See the [Flow pipelines](flow.md)
+guide and `ExternalService.Flow`.
 
 ## Migrating from `ExternalService.Gateway`
 
