@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [2.0.0-rc.2] - 2026-06-22
+
 ### Added
 - `RetryOptions.retry_on` now accepts a **predicate over the return value**, so
   retries can be driven from a function that does not itself return
@@ -173,7 +175,8 @@ introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/2.0.0-rc.1...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/2.0.0-rc.2...HEAD
+[2.0.0-rc.2]: https://github.com/jvoegele/external_service/compare/2.0.0-rc.1...2.0.0-rc.2
 [2.0.0-rc.1]: https://github.com/jvoegele/external_service/compare/1.1.4...2.0.0-rc.1
 [1.1.2]: https://github.com/jvoegele/external_service/compare/1.1.1...1.1.2
 [1.1.1]: https://github.com/jvoegele/external_service/compare/1.1.0...1.1.1
