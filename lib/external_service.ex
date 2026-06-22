@@ -36,8 +36,9 @@ defmodule ExternalService do
 
     * `[:external_service, :call, :retry]` - emitted each time a call's function
       fails in a way that melts the circuit breaker: it returned `:retry` /
-      `{:retry, reason}`, or it raised an exception listed in the `:retry_on`
-      retry option. Exceptions not listed in `:retry_on` neither melt the breaker
+      `{:retry, reason}`, it returned a result matched by the `:retry_on`
+      predicate, or it raised an exception listed in the `:retry_exceptions` retry
+      option. Exceptions not listed in `:retry_exceptions` neither melt the breaker
       nor emit this event. Whether another attempt is actually made depends on the
       retry options.
       * Measurements: `:count` (always `1`)
@@ -319,10 +320,16 @@ defmodule ExternalService do
   other result is considered successful, so the operation will not be retried and the result of
   the function will be returned as the result of `call`.
 
-  Raised exceptions are only retried if their type is listed in the `:retry_on` retry option
+  For functions that were not written to return `:retry`/`{:retry, reason}`, the `:retry_on` retry
+  option takes a predicate that is run on the return value; when it returns a truthy value the call
+  is retried as though the function had returned `{:retry, result}` (the result becomes the retry
+  reason and the circuit breaker melts). An explicit `:retry`/`{:retry, reason}` return always
+  takes precedence over the predicate.
+
+  Raised exceptions are only retried if their type is listed in the `:retry_exceptions` retry option
   (which defaults to `[]`); otherwise they propagate to the caller untouched. An exception that is
-  not retried also does *not* melt the circuit breaker — `:retry_on` governs both retrying and
-  whether a raised exception counts as a circuit-breaker failure.
+  not retried also does *not* melt the circuit breaker — `:retry_exceptions` governs both retrying
+  and whether a raised exception counts as a circuit-breaker failure.
 
   `retry_opts` may be a `t:ExternalService.RetryOptions.t/0` struct or a keyword list of retry
   options. A keyword list is treated as per-call *overrides*: it is merged onto the service's
@@ -474,10 +481,10 @@ defmodule ExternalService do
   defp call_with_retry(service, retry_opts, function) do
     require Retry
 
-    Retry.retry with: apply_retry_options(retry_opts), rescue_only: retry_opts.retry_on do
+    Retry.retry with: apply_retry_options(retry_opts), rescue_only: retry_opts.retry_exceptions do
       case Fuse.ask(service, :sync) do
         :ok ->
-          try_function(service, retry_opts.retry_on, function)
+          try_function(service, retry_opts, function)
 
         :blown ->
           emit_blown(service)
@@ -538,9 +545,9 @@ defmodule ExternalService do
        when is_integer(max_attempts) and max_attempts > 0,
        do: Stream.take(stream, max_attempts - 1)
 
-  @spec try_function(service, [module()], retriable_function) ::
+  @spec try_function(service, RetryOptions.t(), retriable_function) ::
           {:error, {:retry, any}} | {:error, :retry} | {:no_retry, any} | no_return
-  defp try_function(service, retry_on, function) do
+  defp try_function(service, retry_opts, function) do
     rate_limit = State.get(service).rate_limit
 
     case RateLimit.call(rate_limit, function) do
@@ -555,15 +562,15 @@ defmodule ExternalService do
         {:error, :retry}
 
       result ->
-        {:no_retry, result}
+        maybe_retry_on_result(service, retry_opts.retry_on, result)
     end
   rescue
     error ->
       # A raised exception only counts as a failure (melting the circuit breaker)
-      # when it is one we would retry on. Exceptions not listed in `:retry_on`
-      # propagate untouched and leave the breaker alone — `:retry_on` governs both
-      # retrying and melting.
-      if retriable_exception?(error, retry_on) do
+      # when it is one we would retry on. Exceptions not listed in `:retry_exceptions`
+      # propagate untouched and leave the breaker alone — `:retry_exceptions` governs
+      # both retrying and melting.
+      if retriable_exception?(error, retry_opts.retry_exceptions) do
         emit_retry(service, error)
         Fuse.melt(service)
       end
@@ -571,10 +578,27 @@ defmodule ExternalService do
       reraise error, __STACKTRACE__
   end
 
+  # When a `:retry_on` predicate is configured, a result it matches is treated as a
+  # retry — melting the breaker and using the result itself as the retry reason —
+  # exactly like an explicit `:retry` return (which is handled before we get here,
+  # so an explicit return always takes precedence). With no predicate, or when it
+  # does not match, the result is returned untouched.
+  defp maybe_retry_on_result(_service, nil, result), do: {:no_retry, result}
+
+  defp maybe_retry_on_result(service, predicate, result) when is_function(predicate, 1) do
+    if predicate.(result) do
+      emit_retry(service, result)
+      Fuse.melt(service)
+      {:error, {:retry, result}}
+    else
+      {:no_retry, result}
+    end
+  end
+
   # Mirrors the matching done by `Retry.retry`'s `:rescue_only`: an exception is
-  # retriable when its struct is one of the modules listed in `:retry_on`.
-  defp retriable_exception?(error, retry_on) do
-    Enum.any?(retry_on, fn module -> is_struct(error, module) end)
+  # retriable when its struct is one of the modules listed in `:retry_exceptions`.
+  defp retriable_exception?(error, retry_exceptions) do
+    Enum.any?(retry_exceptions, fn module -> is_struct(error, module) end)
   end
 
   defp retries_exhausted(service, reason) do

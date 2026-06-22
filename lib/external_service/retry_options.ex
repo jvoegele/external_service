@@ -37,12 +37,22 @@ defmodule ExternalService.RetryOptions do
           "applies that proportion. Helps avoid retrying in lockstep (thundering herd)."
     ],
     retry_on: [
+      type: {:fun, 1},
+      doc:
+        "A predicate run on the *return value* of the call. When it returns a truthy value " <>
+          "the call is retried, exactly as if the function had returned `:retry` (the result " <>
+          "itself is used as the retry reason, and the circuit breaker melts). Lets you drive " <>
+          "retries from a function that was not written to return `:retry`/`{:retry, reason}`. " <>
+          "Defaults to no predicate. An explicit `:retry`/`{:retry, reason}` return always takes " <>
+          "precedence over the predicate."
+    ],
+    retry_exceptions: [
       type: {:list, :atom},
       default: [],
       doc:
         "Exception modules that should trigger a retry when raised. Defaults to `[]`, " <>
           "meaning raised exceptions are not retried; use `:retry`/`{:retry, reason}` return " <>
-          "values to drive retries instead."
+          "values, or the `:retry_on` predicate, to drive retries instead."
     ]
   ]
 
@@ -65,7 +75,8 @@ defmodule ExternalService.RetryOptions do
           expiry: pos_integer() | nil,
           max_attempts: pos_integer() | nil,
           jitter: boolean() | float(),
-          retry_on: [module()]
+          retry_on: (term() -> as_boolean(term())) | nil,
+          retry_exceptions: [module()]
         }
 
   defstruct backoff: :exponential,
@@ -75,7 +86,8 @@ defmodule ExternalService.RetryOptions do
             expiry: nil,
             max_attempts: nil,
             jitter: false,
-            retry_on: []
+            retry_on: nil,
+            retry_exceptions: []
 
   @doc """
   Builds a validated `RetryOptions` struct from a keyword list (or returns an

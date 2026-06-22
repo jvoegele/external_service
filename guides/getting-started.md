@@ -124,8 +124,9 @@ end
 
 By default, **raised exceptions are not retried** — they propagate to the
 caller. If you want an exception type to trigger a retry, list it in the
-`:retry_on` retry option. See the [Retries](retries.md) guide for the full set
-of retry knobs.
+`:retry_exceptions` retry option; to retry based on the return value of a function
+you don't want to modify, use the `:retry_on` predicate. See the
+[Retries](retries.md) guide for the full set of retry knobs.
 
 ## Handling failures
 

@@ -113,8 +113,8 @@ Remember that, by default, exceptions raised by your wrapped function are **not
 retried** â€” they propagate to the caller (out of both `call/3` and `call!/3`).
 They are also not converted into `ExternalService` error types; a raised
 `MyApp.HTTPError` comes out of `call` as a raised `MyApp.HTTPError`. If you want
-such an exception retried, add its module to the `:retry_on` retry option (see
-[Retries](retries.md)). If you want it returned rather than raised, catch it
+such an exception retried, add its module to the `:retry_exceptions` retry option
+(see [Retries](retries.md)). If you want it returned rather than raised, catch it
 inside your function and return an `{:error, reason}` (or `{:retry, reason}`)
 value.
 
@@ -124,5 +124,5 @@ in a linked `Task`, so an exception that propagates out of it crashes the task â
 down if you don't await. In `call_async_stream/2`, an exception raised for one
 element exits that task and, by default, propagates out of the stream. So for
 background and bulk work, prefer returning `{:error, reason}` / `{:retry, reason}`
-values (or listing the exception in `:retry_on`) over letting exceptions escape,
+values (or listing the exception in `:retry_exceptions`) over letting exceptions escape,
 so one bad element can't crash the batch.
