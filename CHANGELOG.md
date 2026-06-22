@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `ExternalService.call/2` (or `call/3` when passed per-call retry options) instead
   of writing `call fn -> ... end` by hand. Built on the
   [`decorator`](https://hex.pm/packages/decorator) library.
+- `ExternalService.Flow`: process an enumerable (or an existing `Flow`) through
+  guarded `ExternalService` calls as a stage of a [`Flow`](https://hexdocs.pm/flow)
+  pipeline ([issue #27](https://github.com/jvoegele/external_service/issues/27)).
+  `ExternalService.Flow.map/3,4,5` returns a `Flow`, reusing `call/3` per element
+  so retries, the circuit breaker, rate limiting, telemetry, and the
+  structured-error returns all apply (errors arrive as `{:error, ...}` elements;
+  results are unordered). `:flow` is an **optional** dependency — the module is
+  only compiled when you add it. For simple ordered parallel maps,
+  `call_async_stream/5` remains the right tool.
 
 ## [2.0.0] - 2026-06-23
 

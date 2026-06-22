@@ -74,6 +74,15 @@ ids
 > (below) and, if needed, run the work through `call_async_stream/2` (so a pool
 > of tasks absorbs the wait) or apply your own back-pressure upstream.
 
+## Pacing inside a Flow pipeline
+
+`ExternalService.Flow` (the optional `:flow` integration) paces the same way: a
+throttled call sleeps inside its stage process, which back-pressures the pipeline
+upstream. The rate-limit bucket is global per service, so the configured limit is
+honored across all of Flow's parallel stages. Because a sleeping call stalls the
+rest of its demand batch, a smaller `:max_demand` gives smoother pacing under a
+rate limit. See `ExternalService.Flow` for details.
+
 ## Customizing the sleep
 
 By default sleeping uses `Process.sleep/1`. In tests — where you don't want real
