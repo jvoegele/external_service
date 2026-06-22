@@ -50,6 +50,7 @@ defmodule ExternalService.Mixfile do
       {:retry, "~> 0.18"},
       {:ex_rated, "~> 2.1"},
       {:deep_merge, "~> 1.0"},
+      {:decorator, "~> 1.4"},
       {:errata, "~> 1.3"},
       {:nimble_options, "~> 1.1"},
       {:telemetry, "~> 1.0"},
