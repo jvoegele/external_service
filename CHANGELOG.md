@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- `RetryOptions.retry_on` now accepts a **predicate over the return value**, so
+  retries can be driven from a function that does not itself return
+  `:retry` / `{:retry, reason}` (the common case when adapting an existing client
+  function). When the predicate returns a truthy value the call is retried — the
+  result becomes the retry reason and the circuit breaker melts — exactly like an
+  explicit `:retry` return, which still takes precedence
+  ([issue #29](https://github.com/jvoegele/external_service/issues/29)).
+
+### Changed (breaking)
+- Renamed the exception-list retry option **`retry_on` → `retry_exceptions`**
+  (relative to `2.0.0-rc.1`) to free the concise `:retry_on` name for the new
+  result predicate above. The 1.x → 2.0 mapping is now
+  `rescue_only:` → `retry_exceptions:`. `:retry_on` now expects an arity-1
+  function, so a leftover `retry_on: [SomeError]` from `rc.1` raises a
+  `NimbleOptions.ValidationError` at `start/2`.
+
 ## [2.0.0-rc.1] - 2026-06-18
 
 First release candidate for 2.0. The 2.0 line modernizes the project and

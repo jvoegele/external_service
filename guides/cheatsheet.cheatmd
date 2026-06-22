@@ -81,8 +81,9 @@ end
 | --- | --- |
 | `:retry` | retry |
 | `{:retry, reason}` | retry (reason recorded) |
+| value matched by `:retry_on` predicate | retry (result recorded as reason) |
 | anything else | success, returned as-is |
-| raised exception | propagates (retried only if in `:retry_on`) |
+| raised exception | propagates (retried only if in `:retry_exceptions`) |
 
 ## Circuit breaker config
 {: .col-2}
@@ -121,7 +122,8 @@ retry: [
   max_attempts: 5,         # attempt count bound
   expiry: :timer.seconds(10), # time budget ms
   jitter: true,            # ±10%, or a float proportion
-  retry_on: []             # exception modules to retry
+  retry_on: &match?({:error, _}, &1), # predicate over the result
+  retry_exceptions: []     # exception modules to retry
 ]
 ```
 
@@ -136,7 +138,10 @@ retry: [backoff: :exponential, base: 100, cap: 2_000,
         max_attempts: 5, jitter: true]
 
 # Retry a transient exception
-retry: [retry_on: [MyApp.TransientError]]
+retry: [retry_exceptions: [MyApp.TransientError]]
+
+# Retry on the result of an unmodified function
+retry: [retry_on: &match?({:error, %{status: 500}}, &1)]
 ```
 
 ## Error handling

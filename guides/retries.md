@@ -32,6 +32,34 @@ end
 Each retry melts the service's circuit breaker, so a sustained run of retries
 will eventually open it. See [Circuit breakers](circuit-breakers.md).
 
+## Retrying on the return value with `:retry_on`
+
+Returning `:retry` works when you control the function body. When you're calling
+an existing function that already returns its own result shape — and you'd rather
+not wrap it just to translate that shape into `:retry` — the `:retry_on` retry
+option takes a **predicate** that is run on the return value. When the predicate
+returns a truthy value, the call is retried exactly as if the function had
+returned `{:retry, result}`: the result becomes the retry reason, and the circuit
+breaker melts.
+
+```elixir
+# Retry any 5xx response from an unmodified client function.
+retry: [retry_on: &match?({:error, %{status: s}} when s in 500..599, &1)]
+
+call fn -> Stripe.charge(params) end
+```
+
+If retries are exhausted, the matched result is carried as the reason on
+`ExternalService.RetriesExhausted` (and in the `[:external_service, :call, :retry]`
+telemetry metadata). An explicit `:retry` / `{:retry, reason}` return from the
+function always takes precedence over the predicate.
+
+> #### Prefer explicit returns when you own the function {: .tip}
+>
+> `:retry_on` is for adapting functions you don't want to change. When you do
+> control the body, returning `:retry` / `{:retry, reason}` keeps the retry
+> decision explicit and local to the call.
+
 ## Configuring retries
 
 Retry behavior is described by `ExternalService.RetryOptions`. You can supply it
@@ -77,7 +105,8 @@ When you use the two-argument `call/2` (no options), the service's default
 | `:expiry`       | —              | Total time budget for retries, in milliseconds. Retrying stops once exceeded.                |
 | `:max_attempts` | —              | Maximum number of attempts (initial plus retries). No limit by default.                      |
 | `:jitter`       | `false`        | Random jitter on delays. `true` applies ±10%; a float (e.g. `0.25`) applies that proportion. |
-| `:retry_on`     | `[]`           | Exception modules that should trigger a retry when raised.                                   |
+| `:retry_on`     | —              | Predicate run on the return value; retry when it returns a truthy value (see below).        |
+| `:retry_exceptions` | `[]`       | Exception modules that should trigger a retry when raised.                                   |
 
 Options are validated when the struct is built; an invalid value raises
 `NimbleOptions.ValidationError` with a helpful message.
@@ -163,23 +192,23 @@ the caller. This is a deliberate 2.0 change (see
 every `RuntimeError` by default tended to mask real bugs.
 
 If a particular exception genuinely indicates a transient condition worth
-retrying, list its module in `:retry_on`:
+retrying, list its module in `:retry_exceptions`:
 
 ```elixir
-retry: [retry_on: [MyApp.TransientError, DBConnection.ConnectionError]]
+retry: [retry_exceptions: [MyApp.TransientError, DBConnection.ConnectionError]]
 ```
 
 Now a raised `MyApp.TransientError` triggers a retry just like a `:retry` return
 value would, and it melts the circuit breaker. Exceptions not in the list still
-propagate untouched and leave the breaker alone — `:retry_on` governs both
+propagate untouched and leave the breaker alone — `:retry_exceptions` governs both
 retrying and whether a raised exception counts against the breaker.
 
 > #### Prefer return values over exceptions {: .tip}
 >
 > Where you can, drive retries with `:retry` / `{:retry, reason}` return values
-> rather than relying on `:retry_on`. It keeps the retry decision explicit and
-> local to the call, and avoids retrying an exception that happens to share a
-> type with a genuine bug.
+> (or the `:retry_on` predicate) rather than relying on `:retry_exceptions`. It
+> keeps the retry decision explicit and local to the call, and avoids retrying an
+> exception that happens to share a type with a genuine bug.
 
 ## Putting it together
 

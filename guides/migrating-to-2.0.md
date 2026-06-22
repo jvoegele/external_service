@@ -23,7 +23,7 @@ sections below in order; each shows the 1.x form and its 2.0 replacement.
 | Service identifier term   | `fuse_name`                                                | `service`                                            |
 | Reset a breaker           | `reset_fuse/1`                                             | `reset/1`                                            |
 | Retry backoff             | `{:exponential, d}` / `{:linear, d, f}`                    | `backoff: :exponential\|:linear` + `base:`/`factor:` |
-| Retry on exceptions       | `rescue_only: [...]` (retried `RuntimeError` by default)   | `retry_on: [...]`, default `[]`                      |
+| Retry on exceptions       | `rescue_only: [...]` (retried `RuntimeError` by default)   | `retry_exceptions: [...]`, default `[]`              |
 | Jitter                    | `randomize:`                                               | `jitter:`                                            |
 | Module gateway            | `use ExternalService.Gateway` + `external_call/*`          | `use ExternalService` + `call/*`                     |
 | Library errors (returned) | nested tuples                                              | structured `Errata` structs                          |
@@ -86,7 +86,7 @@ alias — see section 7.)
 
 `ExternalService.RetryOptions` changed shape. Backoff is now a plain atom plus
 separate numeric fields, `randomize` became `jitter`, and `rescue_only` became
-`retry_on`.
+`retry_exceptions`.
 
 ```elixir
 # Before (1.x)
@@ -101,7 +101,7 @@ separate numeric fields, `randomize` became `jitter`, and `rescue_only` became
   backoff: :exponential,
   base: 100,
   jitter: true,
-  retry_on: [RuntimeError]
+  retry_exceptions: [RuntimeError]
 }
 ```
 
@@ -110,7 +110,11 @@ Mapping:
 - `backoff: {:exponential, delay}` → `backoff: :exponential, base: delay`
 - `backoff: {:linear, delay, factor}` → `backoff: :linear, base: delay, factor: factor`
 - `randomize: true` → `jitter: true` (a float still means that proportion)
-- `rescue_only: mods` → `retry_on: mods`
+- `rescue_only: mods` → `retry_exceptions: mods`
+
+The freed-up `:retry_on` name now takes a **predicate over the return value** —
+a way to drive retries from a function that doesn't return `:retry`. See the
+[Retries](retries.md) guide.
 
 You can also now pass retry options as a plain keyword list to `call/3` /
 `call!/3` and to the `:retry` option, not only as a struct.
@@ -119,14 +123,14 @@ You can also now pass retry options as a plain keyword list to `call/3` /
 
 This is the one change that can alter runtime behavior rather than just syntax.
 In 1.x, `rescue_only` defaulted to `[RuntimeError]`, so any raised `RuntimeError`
-was retried automatically. In 2.0, **`retry_on` defaults to `[]`** — raised
+was retried automatically. In 2.0, **`retry_exceptions` defaults to `[]`** — raised
 exceptions are _not_ retried unless you opt in
 ([issue #7](https://github.com/jvoegele/external_service/issues/7)).
 
 If you were relying on exceptions being retried, restore it explicitly:
 
 ```elixir
-retry: [retry_on: [RuntimeError]]
+retry: [retry_exceptions: [RuntimeError]]
 ```
 
 But prefer driving retries with `:retry` / `{:retry, reason}` return values where
@@ -255,8 +259,8 @@ Renames at the call site: `external_call` → `call`, `external_call!` → `call
 - [ ] `fuse_strategy:`/`fuse_refresh:` → `circuit_breaker: [tolerate:, within:, reset:]`.
 - [ ] `rate_limit: {l, w}` → `rate_limit: [limit: l, per: w]`.
 - [ ] `reset_fuse/1` → `reset/1`.
-- [ ] `RetryOptions`: tuple backoff → atom `backoff:` + `base:`/`factor:`; `randomize:` → `jitter:`; `rescue_only:` → `retry_on:`.
-- [ ] Re-add `retry_on: [RuntimeError]` only where you actually want exceptions retried.
+- [ ] `RetryOptions`: tuple backoff → atom `backoff:` + `base:`/`factor:`; `randomize:` → `jitter:`; `rescue_only:` → `retry_exceptions:`.
+- [ ] Re-add `retry_exceptions: [RuntimeError]` only where you actually want exceptions retried.
 - [ ] Replace error tuples with the structured `RetriesExhausted` / `CircuitBreakerOpen` / `ServiceNotStarted` structs.
 - [ ] Replace the old `*Error` modules in `rescue` clauses.
 - [ ] (Recommended) Move `use ExternalService.Gateway` modules to `use ExternalService`.

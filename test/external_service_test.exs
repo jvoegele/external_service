@@ -16,17 +16,17 @@ defmodule ExternalServiceTest do
   }
 
   # Retries raised RuntimeErrors (the new default is to NOT retry exceptions).
-  @retry_on_runtime %RetryOptions{
+  @retry_runtime_errors %RetryOptions{
     backoff: :linear,
     base: 0,
-    retry_on: [RuntimeError]
+    retry_exceptions: [RuntimeError]
   }
 
   @expiring_retry_options %RetryOptions{
     backoff: :linear,
     base: 1,
     expiry: 1,
-    retry_on: [RuntimeError]
+    retry_exceptions: [RuntimeError]
   }
 
   describe "uninitialized fuse" do
@@ -115,8 +115,8 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == 1
     end
 
-    test "calls function again when it raises an exception listed in retry_on" do
-      ExternalService.call(@fuse_name, @retry_on_runtime, fn ->
+    test "calls function again when it raises an exception listed in retry_exceptions" do
+      ExternalService.call(@fuse_name, @retry_runtime_errors, fn ->
         Process.put(@fuse_name, Process.get(@fuse_name) + 1)
         raise "KABOOM!"
       end)
@@ -124,8 +124,8 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
-    test "calls function again when it raises another exception type listed in retry_on" do
-      retry_opts = %{@retry_opts | retry_on: [ArithmeticError, ArgumentError]}
+    test "calls function again when it raises another exception type listed in retry_exceptions" do
+      retry_opts = %{@retry_opts | retry_exceptions: [ArithmeticError, ArgumentError]}
 
       ExternalService.call(@fuse_name, retry_opts, fn ->
         Process.put(@fuse_name, Process.get(@fuse_name) + 1)
@@ -135,8 +135,8 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
-    test "does not call function again when it raises an exception not listed in retry_on" do
-      retry_opts = %{@retry_opts | retry_on: [SystemLimitError, File.Error]}
+    test "does not call function again when it raises an exception not listed in retry_exceptions" do
+      retry_opts = %{@retry_opts | retry_exceptions: [SystemLimitError, File.Error]}
 
       assert_raise(RuntimeError, fn ->
         ExternalService.call(@fuse_name, retry_opts, fn ->
@@ -148,8 +148,8 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == 1
     end
 
-    test "an exception not listed in retry_on does not melt the circuit breaker" do
-      retry_opts = %{@retry_opts | retry_on: [ArgumentError]}
+    test "an exception not listed in retry_exceptions does not melt the circuit breaker" do
+      retry_opts = %{@retry_opts | retry_exceptions: [ArgumentError]}
 
       # Raise far more times than the breaker would tolerate; because the
       # exception is not retriable, none of these should count as a failure.
@@ -173,7 +173,7 @@ defmodule ExternalServiceTest do
 
     test "returns CircuitBreakerOpen when the fuse is blown by exceptions" do
       res =
-        ExternalService.call(@fuse_name, @retry_on_runtime, fn ->
+        ExternalService.call(@fuse_name, @retry_runtime_errors, fn ->
           raise "KABOOM!"
         end)
 
@@ -213,6 +213,64 @@ defmodule ExternalServiceTest do
         end)
 
       assert res == {:error, "reason"}
+    end
+
+    test "calls function again when the retry_on predicate matches the result" do
+      retry_opts = %{@retry_opts | retry_on: &match?({:error, _}, &1)}
+
+      ExternalService.call(@fuse_name, retry_opts, fn ->
+        Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+        {:error, :nope}
+      end)
+
+      assert Process.get(@fuse_name) == @fuse_retries + 1
+    end
+
+    test "returns the result unchanged when the retry_on predicate does not match" do
+      retry_opts = %{@retry_opts | retry_on: &match?({:error, _}, &1)}
+
+      res =
+        ExternalService.call(@fuse_name, retry_opts, fn ->
+          Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+          {:ok, :good}
+        end)
+
+      assert res == {:ok, :good}
+      assert Process.get(@fuse_name) == 1
+    end
+
+    test "a result matched by the retry_on predicate melts the circuit breaker" do
+      retry_opts = %{@retry_opts | retry_on: &match?({:error, _}, &1)}
+
+      res = ExternalService.call(@fuse_name, retry_opts, fn -> {:error, :boom} end)
+
+      assert {:error, %CircuitBreakerOpen{context: %{service: @fuse_name}}} = res
+    end
+
+    test "exhausting retries via the retry_on predicate surfaces the result as the reason" do
+      retry_opts = %RetryOptions{
+        backoff: :linear,
+        base: 1,
+        expiry: 1,
+        retry_on: &match?({:error, _}, &1)
+      }
+
+      res = ExternalService.call(@fuse_name, retry_opts, fn -> {:error, :boom} end)
+
+      assert {:error, %RetriesExhausted{context: %{reason: {:error, :boom}}}} = res
+    end
+
+    test "an explicit :retry return takes precedence over the retry_on predicate" do
+      # The predicate never matches, yet an explicit `:retry` must still retry:
+      # the `:retry` protocol is handled before the predicate is ever consulted.
+      retry_opts = %{@retry_opts | retry_on: fn _ -> false end}
+
+      ExternalService.call(@fuse_name, retry_opts, fn ->
+        Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+        :retry
+      end)
+
+      assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
     test "calls sleep function when rate limit is reached" do
@@ -349,9 +407,9 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == 2
     end
 
-    test "calls function again when it raises an exception listed in retry_on" do
+    test "calls function again when it raises an exception listed in retry_exceptions" do
       try do
-        ExternalService.call!(@fuse_name, @retry_on_runtime, fn ->
+        ExternalService.call!(@fuse_name, @retry_runtime_errors, fn ->
           Process.put(@fuse_name, Process.get(@fuse_name) + 1)
           raise "KABOOM!"
         end)
@@ -373,7 +431,7 @@ defmodule ExternalServiceTest do
 
     test "raises CircuitBreakerOpen when the fuse is blown by exceptions" do
       assert_raise CircuitBreakerOpen, fn ->
-        ExternalService.call!(@fuse_name, @retry_on_runtime, fn -> raise "KABOOM!" end)
+        ExternalService.call!(@fuse_name, @retry_runtime_errors, fn -> raise "KABOOM!" end)
       end
     end
 
@@ -684,9 +742,25 @@ defmodule ExternalServiceTest do
                        %{service: ^name, reason: :boom}}
     end
 
+    test "emits a retry event carrying the result when the retry_on predicate matches" do
+      name = start_fuse(:"telemetry-retry-on")
+
+      retry_opts = %RetryOptions{
+        backoff: :linear,
+        base: 1,
+        expiry: 1,
+        retry_on: &match?({:error, _}, &1)
+      }
+
+      ExternalService.call(name, retry_opts, fn -> {:error, :boom} end)
+
+      assert_received {:telemetry, [:external_service, :call, :retry], %{count: 1},
+                       %{service: ^name, reason: {:error, :boom}}}
+    end
+
     test "emits a call exception event when the function raises a non-retriable error" do
       name = start_fuse(:"telemetry-exception")
-      retry_opts = %RetryOptions{backoff: :linear, base: 0, retry_on: [ArgumentError]}
+      retry_opts = %RetryOptions{backoff: :linear, base: 0, retry_exceptions: [ArgumentError]}
 
       assert_raise RuntimeError, fn ->
         ExternalService.call(name, retry_opts, fn -> raise "boom" end)
