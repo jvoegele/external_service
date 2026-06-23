@@ -143,6 +143,58 @@ ExternalService.call({:tenant, tenant_id}, fn -> fetch(tenant_id) end)
 The two styles interoperate freely; the front door is just the ergonomic
 default.
 
+## Decorator annotations
+
+If you'd rather not wrap each body in `call fn -> ... end`, `ExternalService.Decorator`
+lets you mark a function as an external call with a `@decorate` annotation and write
+the body directly. It's a thin convenience layer over `call` — nothing more.
+
+```elixir
+defmodule MyApp.Payments do
+  use ExternalService.Decorator
+
+  @decorate external_call(MyApp.Stripe)
+  def charge(params) do
+    case Stripe.charge(params) do
+      {:error, %{status: s}} when s in 500..599 -> :retry
+      other -> other
+    end
+  end
+
+  @decorate external_call!(MyApp.Stripe)
+  def capture(id), do: Stripe.capture(id)
+end
+```
+
+The decorated body *is* the retriable function, so the same retry protocol applies:
+it drives retries by returning `:retry` / `{:retry, reason}`, and the call returns the
+body's value on success or a structured error on failure. `external_call!` raises
+instead of returning, mirroring `call!`.
+
+The service argument is any started service term — it need not be the module the
+function lives in, so one module can front several services.
+
+To retry based on the **return value** of an unmodified function, pass per-call retry
+options (the same ones `call/3` accepts) as a second argument — most usefully a
+`:retry_on` predicate:
+
+```elixir
+@decorate external_call(MyApp.Stripe, retry_on: &match?({:error, %{status: 500}}, &1))
+def charge(params), do: Stripe.charge(params)
+```
+
+> #### Multi-clause functions, default args, and guards {: .info}
+>
+> Annotate an empty function head and let it cover every clause:
+>
+> ```elixir
+> @decorate external_call(MyApp.Stripe)
+> def fetch(id, opts \\ [])
+> def fetch(id, opts) when is_integer(id), do: Client.get(id, opts)
+> ```
+
+See `ExternalService.Decorator` for the full reference.
+
 ## Migrating from `ExternalService.Gateway`
 
 `use ExternalService.Gateway` (the 1.x module-based gateway) still works but is

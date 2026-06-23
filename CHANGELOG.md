@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- `ExternalService.Decorator`: decorator-based annotations for marking a function
+  as an external call ([issue #28](https://github.com/jvoegele/external_service/issues/28)).
+  `use ExternalService.Decorator` brings `@decorate external_call(service)` (and a
+  raising `external_call!`) into scope, wrapping the function body in
+  `ExternalService.call/2` (or `call/3` when passed per-call retry options) instead
+  of writing `call fn -> ... end` by hand. Built on the
+  [`decorator`](https://hex.pm/packages/decorator) library.
+
 ## [2.0.0] - 2026-06-23
 
 The 2.0 line modernizes the project and introduces breaking changes. See the
