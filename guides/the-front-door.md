@@ -195,6 +195,24 @@ def charge(params), do: Stripe.charge(params)
 
 See `ExternalService.Decorator` for the full reference.
 
+## Flow-based pipelines
+
+For parallel work that is part of a larger pipeline — partitioned, back-pressured
+processing with downstream `map`/`filter`/`reduce` stages — the optional
+`ExternalService.Flow` integration runs each element through a guarded `call` as a
+[`Flow`](https://hexdocs.pm/flow) stage:
+
+```elixir
+orders
+|> ExternalService.Flow.map(MyApp.Stripe, fn order -> charge(order) end)
+|> Flow.filter(&match?({:ok, _}, &1))
+|> Enum.to_list()
+```
+
+It requires adding `:flow` to your deps. For a simple ordered parallel map,
+`call_async_stream/2` is still the right tool. See the [Flow pipelines](flow.md)
+guide and `ExternalService.Flow`.
+
 ## Migrating from `ExternalService.Gateway`
 
 `use ExternalService.Gateway` (the 1.x module-based gateway) still works but is

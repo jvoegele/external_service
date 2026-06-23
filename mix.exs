@@ -52,6 +52,7 @@ defmodule ExternalService.Mixfile do
       {:deep_merge, "~> 1.0"},
       {:decorator, "~> 1.4"},
       {:errata, "~> 1.3"},
+      {:flow, "~> 1.2", optional: true},
       {:nimble_options, "~> 1.1"},
       {:telemetry, "~> 1.0"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
@@ -81,6 +82,7 @@ defmodule ExternalService.Mixfile do
         "guides/rate-limiting.md",
         "guides/error-handling.md",
         "guides/telemetry.md",
+        "guides/flow.md",
         "guides/cheatsheet.cheatmd",
         "guides/migrating-to-2.0.md",
         "guides/about.md",
@@ -96,7 +98,8 @@ defmodule ExternalService.Mixfile do
           "guides/retries.md",
           "guides/rate-limiting.md",
           "guides/error-handling.md",
-          "guides/telemetry.md"
+          "guides/telemetry.md",
+          "guides/flow.md"
         ],
         Reference: [
           "guides/cheatsheet.cheatmd",
