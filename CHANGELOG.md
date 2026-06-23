@@ -7,29 +7,9 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
-## [2.0.0-rc.2] - 2026-06-22
+## [2.0.0] - 2026-06-23
 
-### Added
-- `RetryOptions.retry_on` now accepts a **predicate over the return value**, so
-  retries can be driven from a function that does not itself return
-  `:retry` / `{:retry, reason}` (the common case when adapting an existing client
-  function). When the predicate returns a truthy value the call is retried — the
-  result becomes the retry reason and the circuit breaker melts — exactly like an
-  explicit `:retry` return, which still takes precedence
-  ([issue #29](https://github.com/jvoegele/external_service/issues/29)).
-
-### Changed (breaking)
-- Renamed the exception-list retry option **`retry_on` → `retry_exceptions`**
-  (relative to `2.0.0-rc.1`) to free the concise `:retry_on` name for the new
-  result predicate above. The 1.x → 2.0 mapping is now
-  `rescue_only:` → `retry_exceptions:`. `:retry_on` now expects an arity-1
-  function, so a leftover `retry_on: [SomeError]` from `rc.1` raises a
-  `NimbleOptions.ValidationError` at `start/2`.
-
-## [2.0.0-rc.1] - 2026-06-18
-
-First release candidate for 2.0. The 2.0 line modernizes the project and
-introduces breaking changes. See the
+The 2.0 line modernizes the project and introduces breaking changes. See the
 [migration guide](guides/migrating-to-2.0.md) for a step-by-step upgrade from
 1.x.
 
@@ -51,6 +31,13 @@ introduces breaking changes. See the
   retries), complementing the existing time-based `:expiry`.
 - `RetryOptions.jitter` to control random jitter on retry delays (`true` for
   +/- 10%, or a float proportion such as `0.25`).
+- `RetryOptions.retry_on` accepts a **predicate over the return value** (an
+  arity-1 function), so retries can be driven from a function that does not itself
+  return `:retry` / `{:retry, reason}` (the common case when adapting an existing
+  client function). When the predicate returns a truthy value the call is retried
+  — the result becomes the retry reason and the circuit breaker melts — exactly
+  like an explicit `:retry` return, which still takes precedence
+  ([issue #29](https://github.com/jvoegele/external_service/issues/29)).
 - **Declarative module front door**: `use ExternalService` generates a small
   wrapper (`call/1,2`, `call!/1,2`, async/stream variants, `available?/0`,
   `blown?/0`, `reset/0`, `child_spec/1`, `start_link/1`) around a service
@@ -93,13 +80,14 @@ introduces breaking changes. See the
   - `backoff` is now `:exponential` / `:linear` with separate `:base` and
     `:factor`, instead of `{:exponential, delay}` / `{:linear, delay, factor}`.
   - `randomize` is now `jitter`.
-  - `rescue_only` is now `retry_on`, and **defaults to `[]`** — raised exceptions
-    are no longer retried by default ([issue #7](https://github.com/jvoegele/external_service/issues/7)).
-    List exception modules in `:retry_on` to retry on them. `:retry_on` now also
-    governs the circuit breaker: an exception that is not retried no longer melts
-    the breaker (it propagates untouched), so a raised exception counts as a
-    circuit-breaker failure only when its type is in `:retry_on`. Explicit
-    `:retry` / `{:retry, reason}` return values always melt the breaker.
+  - `rescue_only` is now `retry_exceptions`, and **defaults to `[]`** — raised
+    exceptions are no longer retried by default ([issue #7](https://github.com/jvoegele/external_service/issues/7)).
+    List exception modules in `:retry_exceptions` to retry on them.
+    `:retry_exceptions` now also governs the circuit breaker: an exception that is
+    not retried no longer melts the breaker (it propagates untouched), so a raised
+    exception counts as a circuit-breaker failure only when its type is in
+    `:retry_exceptions`. Explicit `:retry` / `{:retry, reason}` return values
+    always melt the breaker.
   - `call/3` and `call!/3` now also accept a keyword list of retry options. A
     keyword list is treated as per-call *overrides*: it is merged onto the
     service's configured `:retry` defaults (overriding only the keys it lists and
@@ -175,9 +163,8 @@ introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/2.0.0-rc.2...HEAD
-[2.0.0-rc.2]: https://github.com/jvoegele/external_service/compare/2.0.0-rc.1...2.0.0-rc.2
-[2.0.0-rc.1]: https://github.com/jvoegele/external_service/compare/1.1.4...2.0.0-rc.1
+[Unreleased]: https://github.com/jvoegele/external_service/compare/2.0.0...HEAD
+[2.0.0]: https://github.com/jvoegele/external_service/compare/1.1.4...2.0.0
 [1.1.2]: https://github.com/jvoegele/external_service/compare/1.1.1...1.1.2
 [1.1.1]: https://github.com/jvoegele/external_service/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/jvoegele/external_service/compare/1.0.1...1.1.0
