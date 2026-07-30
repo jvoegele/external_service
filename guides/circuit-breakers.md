@@ -151,3 +151,26 @@ error rate and how costly a false trip is. Some rules of thumb:
   degraded after it has recovered.
 - Remember the breaker is global to the service. Size it for aggregate traffic,
   not a single caller.
+
+## Running on more than one node
+
+"Global to the service" means global *on this node*. Each node counts its own
+failures and opens its own breaker, so in a cluster every node has to learn about
+an outage separately.
+
+That is usually the behavior you want — a node with a bad network path should
+stop calling the service without taking the rest of the cluster with it — but it
+does mean slower convergence. `ExternalService.CircuitBreaker.Cluster` trades
+that isolation for speed, propagating a trip to the other nodes:
+
+```elixir
+use ExternalService,
+  circuit_breaker: [
+    tolerate: 5,
+    within: :timer.seconds(1),
+    backend: ExternalService.CircuitBreaker.Cluster
+  ]
+```
+
+See the [Distributed Elixir](distributed.md) guide for how it works and what the
+trade costs you.

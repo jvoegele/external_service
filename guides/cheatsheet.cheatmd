@@ -98,6 +98,21 @@ circuit_breaker: [
 ]
 ```
 
+### Trip the cluster together
+
+```elixir
+circuit_breaker: [
+  tolerate: 5,
+  backend: ExternalService.CircuitBreaker.Cluster
+]
+
+# narrow the broadcast:
+backend: {ExternalService.CircuitBreaker.Cluster,
+          nodes: &MyApp.api_nodes/0}
+```
+
+Default breaker is node-local (each node trips on its own).
+
 ### Introspect & reset
 
 ```elixir

@@ -187,7 +187,8 @@ module you supply, so you only add Hammer itself.
 
 Writing your own backend is a matter of implementing two callbacks, `init/2` and
 `check/2`, where `check/2` answers `:ok` or `{:wait, milliseconds}`. See
-`ExternalService.RateLimiter`.
+`ExternalService.RateLimiter`, and the [Distributed Elixir](distributed.md) guide
+for the wider picture of running on more than one node.
 
 ## Rate limiting and the circuit breaker
 
