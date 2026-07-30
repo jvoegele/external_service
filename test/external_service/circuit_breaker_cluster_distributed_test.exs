@@ -139,6 +139,8 @@ defmodule ExternalService.CircuitBreaker.ClusterDistributedTest do
     do: :erpc.call(peer_node, ExternalService, :available?, [service])
 
   defp start_distribution! do
+    ensure_epmd()
+
     case :net_kernel.start(:"external_service_primary@127.0.0.1", %{name_domain: :longnames}) do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
@@ -146,6 +148,20 @@ defmodule ExternalService.CircuitBreaker.ClusterDistributedTest do
     end
 
     :erlang.set_cookie(node(), @cookie)
+  end
+
+  # Distribution needs the Erlang port mapper daemon, and a bare CI runner will
+  # not already have one running (`net_kernel:start/2` then fails with
+  # `econnrefused`). Starting it here keeps this test self-sufficient instead of
+  # pushing the requirement into the workflow, and is a no-op when epmd is
+  # already up.
+  defp ensure_epmd do
+    System.cmd("epmd", ["-daemon"])
+    :ok
+  rescue
+    # No epmd on PATH. `net_kernel` may still manage to start one itself, so let
+    # the distribution attempt below report the real problem.
+    ErlangError -> :ok
   end
 
   # Propagation is asynchronous, so assertions poll rather than assuming the
