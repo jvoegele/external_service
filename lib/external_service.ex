@@ -285,12 +285,7 @@ defmodule ExternalService do
   After reset, the breaker will be closed with no recorded failures.
   """
   @spec reset(service()) :: :ok | {:error, :not_found}
-  def reset(service) do
-    case State.fetch(service) do
-      {:ok, state} -> CircuitBreaker.reset(service, state.circuit_breaker)
-      :error -> {:error, :not_found}
-    end
-  end
+  def reset(service), do: CircuitBreaker.reset(service)
 
   @doc """
   Returns `true` if the service is currently available, meaning its circuit
@@ -313,7 +308,7 @@ defmodule ExternalService do
       end
   """
   @spec available?(service()) :: boolean()
-  def available?(service), do: circuit_breaker_state(service) == :ok
+  def available?(service), do: CircuitBreaker.ask(service) == :ok
 
   @doc """
   Returns `true` if the service's circuit breaker is currently blown.
@@ -323,16 +318,7 @@ defmodule ExternalService do
   services that were never started.
   """
   @spec blown?(service()) :: boolean()
-  def blown?(service), do: circuit_breaker_state(service) == :blown
-
-  # A service that was never started has no breaker to ask, and is neither
-  # available nor blown.
-  defp circuit_breaker_state(service) do
-    case State.fetch(service) do
-      {:ok, state} -> CircuitBreaker.ask(service, state.circuit_breaker)
-      :error -> :not_started
-    end
-  end
+  def blown?(service), do: CircuitBreaker.ask(service) == :blown
 
   @doc """
   Returns `true` only if every service in `fuse_names` is `available?/1`.
@@ -349,6 +335,30 @@ defmodule ExternalService do
   """
   @spec all_available?([service()]) :: boolean()
   def all_available?(services), do: Enum.all?(services, &available?/1)
+
+  @doc """
+  Returns `true` if a call to the service would currently be throttled by its
+  rate limit.
+
+  This is a *read*: it consumes none of the service's budget, so it is safe to
+  ask speculatively before committing to expensive work. A service with no rate
+  limit configured is never rate limited.
+
+  As with `available?/1`, this is a best-effort signal — the answer can change
+  between the check and a subsequent `call/3`. Use
+  `ExternalService.RateLimiter.peek/1` when you want to know *how long* the wait
+  would be rather than merely whether there is one.
+
+  ## Examples
+
+      if ExternalService.rate_limited?(:payments) do
+        {:error, :busy}
+      else
+        charge(order)
+      end
+  """
+  @spec rate_limited?(service()) :: boolean()
+  def rate_limited?(service), do: match?({:wait, _}, RateLimiter.peek(service))
 
   @doc """
   Executes a function for the given service, handling retry and circuit breaker logic.

@@ -123,6 +123,16 @@ MyApp.Api.reset()        # force closed
 ExternalService.all_available?([:a, :b])
 ```
 
+### Drive it directly
+
+```elixir
+# count a failure that happened outside call/3
+ExternalService.CircuitBreaker.melt(:api)
+
+# :ok | :blown | :not_started
+ExternalService.CircuitBreaker.ask(:api)
+```
+
 ## Rate limit config
 {: .col-2}
 
@@ -165,6 +175,17 @@ rate_limit: [
 ```
 
 Default backend is node-local: N nodes ⇒ up to N × `limit`.
+
+### Ask, and spend, directly
+
+```elixir
+ExternalService.rate_limited?(:api)      # boolean, consumes nothing
+
+ExternalService.RateLimiter.peek(:api)   # :ok | {:wait, ms}
+
+# spend budget for a call made some other way
+ExternalService.RateLimiter.request(:api)
+```
 
 ## Retry options
 {: .col-2}

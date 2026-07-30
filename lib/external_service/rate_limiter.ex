@@ -9,10 +9,11 @@ defmodule ExternalService.RateLimiter do
 
   ## Writing a backend
 
-  A backend answers exactly one question: may a call proceed right now, and if
-  not, how long until it may? Everything else — sleeping, honoring the `:wait`
-  budget, telemetry, logging — is handled for you, so that every backend behaves
-  consistently.
+  A backend answers one question, in two forms: may a call proceed right now,
+  and if not, how long until it may? `c:check/2` answers it and consumes the
+  call; `c:peek/2` answers it and consumes nothing. Everything else — sleeping,
+  honoring the `:wait` budget, telemetry, logging — is handled for you, so that
+  every backend behaves consistently.
 
       defmodule MyApp.RateLimiter do
         @behaviour ExternalService.RateLimiter
@@ -38,20 +39,51 @@ defmodule ExternalService.RateLimiter do
 
   Backends are **stateless modules**. `c:init/2` returns an opaque config term
   that is stored with the rest of the service state and handed back to every
-  `c:check/2` call, so a backend needs no process, supervisor, or registry of its
+  other callback, so a backend needs no process, supervisor, or registry of its
   own. Anything mutable it needs — an `:atomics` reference, a connection pool
   name, a remote key — travels in that term.
 
   Report a real time-to-next-window from `c:check/2` where you can. Callers sleep
   for exactly as long as you say, so an accurate answer paces calls precisely and
   makes the `:wait` budget meaningful.
+
+  ## Driving a limiter directly
+
+  Most of the time the limiter is driven for you: `ExternalService.call/3` checks
+  it before running your function. The functions in this module are for the cases
+  that fall outside a guarded call.
+
+  `peek/1` asks whether a call would be admitted **without consuming anything**,
+  which is what makes it safe to call speculatively:
+
+      case ExternalService.RateLimiter.peek(:payments) do
+        :ok -> start_expensive_work()
+        {:wait, ms} -> {:error, {:busy, ms}}
+      end
+
+  `ExternalService.rate_limited?/1` is the boolean form, symmetric with
+  `ExternalService.available?/1`.
+
+  `request/1` is the write side: it consumes one call's worth of the budget
+  without running anything, for traffic that reaches the service by some path
+  other than `call/3`.
+
+      # A batch endpoint that costs three calls against the quota.
+      Enum.each(1..3, fn _ -> ExternalService.RateLimiter.request(:payments) end)
+
+  Note that `request/1` blocks according to the service's `:wait` setting, just
+  as a guarded call would.
   """
 
+  alias ExternalService.RateLimited
+  alias ExternalService.ServiceNotStarted
+
+  require Errata
   require Logger
 
   @type service :: ExternalService.service()
 
-  @typedoc "Backend-private state, produced by `c:init/2` and passed to `c:check/2`."
+  @typedoc "Backend-private state, produced by `c:init/2` and passed to every other callback."
   @type config :: term()
 
   @typedoc """
@@ -79,6 +111,18 @@ defmodule ExternalService.RateLimiter do
   """
   @callback check(service(), config()) :: :ok | {:wait, non_neg_integer()}
 
+  @doc """
+  Reports whether a call would be admitted right now, **without consuming**
+  anything.
+
+  Returns the same values as `c:check/2`, but must leave the limiter's state
+  untouched so that callers can ask speculatively. Where a backend can only
+  answer approximately, prefer erring toward `{:wait, _}` — a caller that skips
+  work it could have done is cheaper than one that floods a service it should
+  have waited for.
+  """
+  @callback peek(service(), config()) :: :ok | {:wait, non_neg_integer()}
+
   @default_backend ExternalService.RateLimiter.Local
 
   @typedoc """
@@ -97,9 +141,61 @@ defmodule ExternalService.RateLimiter do
 
   defstruct [:service, :backend, :config, :sleep, wait: :infinity]
 
-  # The functions below drive backends on `ExternalService`'s behalf. They are
-  # not part of the public API: the supported way to reach a rate limiter is by
-  # configuring a service and calling it. Only the behaviour above is public.
+  @doc """
+  Reports whether a call to `service` would be admitted right now, without
+  consuming any of its budget.
+
+  A service with no rate limit configured — including one that was never started
+  — answers `:ok`, since nothing is holding calls back. Use
+  `ExternalService.available?/1` if you need to know whether a service is ready
+  to use.
+  """
+  @spec peek(service()) :: :ok | {:wait, non_neg_integer()}
+  def peek(service) do
+    case fetch(service) do
+      {:ok, %__MODULE__{backend: module, config: config}} -> module.peek(service, config)
+      # Not rate limited, or not started: nothing is making this call wait.
+      _ -> :ok
+    end
+  end
+
+  @doc """
+  Consumes one call's worth of `service`'s rate limit without running anything.
+
+  For traffic that reaches the service by some path other than
+  `ExternalService.call/3` and should still count against the budget. Blocks
+  according to the service's `:wait` setting, exactly as a guarded call would,
+  and returns `ExternalService.RateLimited` if that budget runs out.
+  """
+  @spec request(service()) :: :ok | {:error, RateLimited.t() | ServiceNotStarted.t()}
+  def request(service) do
+    case fetch(service) do
+      {:ok, rate_limiter} -> consume(service, rate_limiter)
+      :not_started -> {:error, Errata.create(ServiceNotStarted, context: %{service: service})}
+    end
+  end
+
+  defp consume(service, rate_limiter) do
+    case call(rate_limiter, fn -> :ok end) do
+      :ok ->
+        :ok
+
+      {__MODULE__, :rate_limited, retry_after} ->
+        {:error,
+         Errata.create(RateLimited, context: %{service: service, retry_after: retry_after})}
+    end
+  end
+
+  defp fetch(service) do
+    case ExternalService.State.fetch(service) do
+      {:ok, %{rate_limit: rate_limiter}} -> {:ok, rate_limiter}
+      :error -> :not_started
+    end
+  end
+
+  # The functions below drive backends on `ExternalService`'s behalf, and take a
+  # built limiter rather than resolving it from the service state. They are not
+  # part of the public API.
 
   @doc false
   @spec default_backend() :: module()

@@ -140,26 +140,29 @@ MyApp.Stripe.reset()
 - [ ] Gather RC feedback, then release `2.0.0` (final) (#25).
 
 ## Deferred to 2.1+
-- Pluggable rate-limit backend (issue #12) and circuit-breaker/state backend for
-  distributed Elixir (issue #13) — behind a `backend:` adapter contract.
-- **Public `ExternalService.CircuitBreaker` / `ExternalService.RateLimiter`
-  modules** (#26). Decided (pre-2.0-rc) *not* to expose the breaker/limiter as
-  standalone, user-facing control modules in 2.0, and to revisit in 2.1 as part
-  of the backend work above. Rationale:
-  - Today they are thin shells over `:fuse` / `ex_rated`; exposing them would
-    freeze those dependencies (and the just-changed melt semantics) into the
-    public contract, directly conflicting with the `backend:` adapter goal.
-  - Neither is a clean standalone API yet (`RateLimit` is coupled to the
-    fuse/service name and sleeps without a timeout; no `CircuitBreaker` module
-    exists — it would be a brand-new API designed under RC time pressure).
-  - The right altitude is already public: the breaker is exposed *as a concept*
-    via `available?/1`, `blown?/1`, `all_available?/1`, `reset/1` — not via raw
-    `:fuse` operations.
-  - When done in 2.1, expose them as **behaviours** with default implementations
-    (the seam for #12/#13), and prefer the agent-noun name `RateLimiter` (the
-    internal `ExternalService.RateLimit` would rename accordingly). A rate-limit
-    *read* helper on the `ExternalService` facade (symmetric with `available?`)
-    is the lightweight option if demand appears sooner.
+- ~~Pluggable rate-limit backend (issue #12) and circuit-breaker/state backend
+  for distributed Elixir (issue #13)~~ — shipped in 2.2.0 behind a `backend:`
+  adapter contract, with `ExternalService.CircuitBreaker.Cluster` and
+  `ExternalService.RateLimiter.Hammer` as the distributed implementations. See
+  the Distributed Elixir guide.
+- ~~**Public `ExternalService.CircuitBreaker` / `ExternalService.RateLimiter`
+  modules** (#26)~~ — deferred out of 2.0, then shipped in two steps.
+
+  The pre-2.0 rationale for waiting was that the two were thin shells over
+  `:fuse` / `ex_rated`, so exposing them would have frozen those dependencies
+  into the public contract and fought the `backend:` adapter goal. Doing the
+  backend work first dissolved that objection: what is public now is the
+  *behaviour contract*, not a third-party API, and `ex_rated` is gone entirely.
+
+  - **2.2.0** exposed both as documented **behaviours** with default
+    implementations (the seam for #12/#13), and renamed the internal
+    `ExternalService.RateLimit` to the agent-noun `RateLimiter`. Control
+    operations stayed `@doc false`.
+  - **After 2.2.0**, the control operations became public: `CircuitBreaker.melt/1`
+    (report a failure the library never saw), `ask/1`, `reset/1`, and
+    `RateLimiter.request/1`, plus the rate-limit *read* helper this roadmap
+    anticipated — `ExternalService.rate_limited?/1`, backed by a new
+    non-consuming `peek/2` behaviour callback.
 - ~~`Flow`-based `call_async_stream` option (#27)~~ — shipped in 2.1.0 as
   `ExternalService.Flow`.
 - ~~Decorator-based annotations for marking external calls (#28)~~ — shipped in

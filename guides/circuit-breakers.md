@@ -126,6 +126,27 @@ A few semantics worth knowing:
 failures. It is mainly useful in tests and in operational tooling ("we fixed the
 upstream, stop failing fast now").
 
+## Reporting a failure the library never saw
+
+The breaker counts failures that happen inside `call/3`. Sometimes a service
+fails somewhere else — a long-lived streaming connection drops, a webhook you
+were expecting never arrives, a request made through a different client times
+out. Those are real failures, and you can tell the breaker about them:
+
+```elixir
+ExternalService.CircuitBreaker.melt(:payments)
+```
+
+A melt counts toward the service's configured `:tolerate` exactly as an in-call
+failure does, so enough of them will open the breaker — and with the
+[cluster breaker](distributed.md), open it across the cluster. This is the
+mirror image of `reset/1`: one forces the breaker closed, the other pushes it
+toward open.
+
+Use it sparingly and only for genuine failures of the service. Melting on
+something that is not the service's fault will fail-fast traffic that would have
+succeeded.
+
 ## Fault injection (for testing)
 
 The `:fault_injection` option makes the breaker fail a random fraction of calls,

@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **A public control API for the circuit breaker and rate limiter**
+  ([issue #26](https://github.com/jvoegele/external_service/issues/26)), for the
+  cases that fall outside a guarded `call/3`. 2.2.0 made
+  `ExternalService.CircuitBreaker` and `ExternalService.RateLimiter` public as
+  *behaviours*; this makes them usable directly.
+  - `ExternalService.CircuitBreaker.melt/1` records a failure the library never
+    saw — a dropped streaming connection, a webhook that never arrived, a call
+    made through a different client. It counts toward the service's `:tolerate`
+    exactly as an in-call failure does, so enough melts open the breaker (and,
+    with the cluster backend, open it across the cluster). The mirror image of
+    `reset/1`.
+  - `ExternalService.CircuitBreaker.ask/1` reports `:ok`, `:blown`, or
+    `:not_started` — the three-valued form of `available?/1` and `blown?/1`.
+  - `ExternalService.CircuitBreaker.reset/1`, the same operation
+    `ExternalService.reset/1` performs.
+  - `ExternalService.RateLimiter.request/1` spends one call's worth of budget
+    without running anything, for traffic that reaches the service by some path
+    other than `call/3`. It honors the service's `:wait` setting and returns
+    `ExternalService.RateLimited` if that budget runs out.
+- **Rate limit introspection.** `ExternalService.rate_limited?/1` reports whether
+  a call would currently be throttled, and `ExternalService.RateLimiter.peek/1`
+  reports how long the wait would be. Both are reads that **consume nothing**, so
+  they are safe to ask speculatively before committing to expensive work —
+  symmetric with `available?/1` for the circuit breaker.
+
+### Changed
+- **The `ExternalService.RateLimiter` behaviour gained a `peek/2` callback.**
+  Backends must answer the same way as `check/2` without consuming anything.
+  Both shipped backends implement it; `Local` reads its atomics slot without the
+  compare-and-exchange, and `Hammer` assembles the answer from `get/2` and
+  `expires_at/2`, since Hammer's `hit/3` both checks and consumes.
+
+  This is a breaking change for anyone who wrote a rate limiter backend against
+  2.2.0. It is being made immediately after that release, while no third-party
+  backends exist, precisely so that it does not have to be made later.
+
 ## [2.2.0] - 2026-07-30
 
 This line makes `ExternalService` work correctly on more than one node. See the
