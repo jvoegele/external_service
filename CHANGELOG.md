@@ -7,6 +7,106 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+This line makes `ExternalService` work correctly on more than one node. See the
+new [Distributed Elixir](guides/distributed.md) guide for the full picture.
+
+The two halves of that problem are not the same kind of problem, and are not
+solved the same way. A node-local **rate limit** is a correctness bug — four
+nodes configured for 100 calls per second send up to 400, violating the quota you
+configured — so the fix is shared counters. A node-local **circuit breaker** is a
+defensible design rather than a bug, since a node with a bad network path should
+stop calling a service without taking the cluster down with it, so cross-node
+tripping is offered as an opt-in choice.
+
+### Added
+- **Pluggable circuit breaker and rate limiter backends**
+  ([issue #12](https://github.com/jvoegele/external_service/issues/12),
+  [issue #13](https://github.com/jvoegele/external_service/issues/13)).
+  Both `:circuit_breaker` and `:rate_limit` accept a `:backend` option, given as
+  a module or a `{module, options}` tuple whose options are passed through to
+  that backend:
+
+  ```elixir
+  use ExternalService,
+    circuit_breaker: [backend: ExternalService.CircuitBreaker.Cluster],
+    rate_limit: [limit: 100, per: 1_000, backend: {MyApp.Limiter, some: :option}]
+  ```
+
+  `ExternalService.CircuitBreaker` and `ExternalService.RateLimiter` are now
+  documented behaviours you can implement — five callbacks for a breaker, two for
+  a limiter. Backends are stateless modules: the `install`/`init` callback returns
+  an opaque config term that is stored with the rest of the service state and
+  handed back to every other callback, so a backend needs no process, supervisor,
+  or registry of its own.
+
+  Note that this exposes the breaker and limiter *as behaviours*, not as
+  user-facing control APIs; the operations themselves remain internal
+  ([issue #26](https://github.com/jvoegele/external_service/issues/26)).
+- **`ExternalService.CircuitBreaker.Cluster`**, an opt-in circuit breaker that
+  trips the whole cluster when any one node trips
+  ([issue #13](https://github.com/jvoegele/external_service/issues/13)). Each node
+  keeps its own ordinary breaker; when one transitions from closed to open it
+  sends a fire-and-forget `:erpc.multicast/4` to the other nodes, each of which
+  trips its own breaker and then recovers on its own reset timer. There is no
+  shared store, no distributed state, and no process or supervision tree for this
+  library to run. A `:nodes` option (a list, or a zero-arity function returning
+  one; default `&Node.list/0`) narrows the broadcast. Read the module docs before
+  enabling it: it trades isolation for convergence, and one bad node can trip the
+  whole cluster.
+- **`ExternalService.RateLimiter.Hammer`**, a rate limiter backend that meters
+  against a [Hammer](https://hexdocs.pm/hammer) module
+  ([issue #12](https://github.com/jvoegele/external_service/issues/12)). With a
+  shared Hammer backend such as
+  [`hammer_backend_redis`](https://hexdocs.pm/hammer_backend_redis) every node
+  draws from the same counters, so the service sees the limit you configured
+  rather than that limit multiplied by your node count. Hammer is **not** a
+  dependency of this library — the backend calls `hit/3` on the module you supply.
+- **`rate_limit: [wait: ...]`** to bound how long a throttled call may block:
+  `:infinity` (the default, and the previous behavior), a millisecond budget for
+  the whole call, or `false` to never wait. Previously a throttled call waited as
+  long as the limiter required with no upper bound.
+- **`ExternalService.RateLimited`**, returned by `call/3` and raised by `call!/3`
+  when the `:wait` budget runs out. The wrapped function is not called. It carries
+  `:context.retry_after` (milliseconds until the call would have been admitted)
+  and reports `http_status/1` of `429`. Being throttled is this library's own
+  back-pressure rather than a failure of the external service, so it does **not**
+  melt the circuit breaker and is **not** retried.
+- A [Distributed Elixir](guides/distributed.md) guide, plus rate limiting and
+  circuit breaker guide sections and cheatsheet entries covering the above.
+
+### Changed
+- **The default rate limiter is now a token bucket, and paces calls differently.**
+  `ExternalService.RateLimiter.Local` replaces the `ex_rated` fixed window. It
+  admits a burst of exactly `:limit` and then paces the rest at one call per
+  `:per / :limit`, refilling one call at a time.
+
+  What you will notice: waiting out a full window no longer hands you a fresh
+  full burst. The fixed window allowed `:limit` calls at the end of one window and
+  another `:limit` at the start of the next, briefly sending **twice** your
+  configured rate at the service — which could trip the provider's own limiter
+  even though you had configured yours correctly. Smoothing that out is the point
+  of the change, but it does mean bursty workloads are now paced where they
+  previously were not.
+
+  No configuration changes: `:limit` and `:per` mean what they did before. The
+  new limiter keeps its counters in a single `:atomics` slot per service, so it
+  needs no owning process, and it is correct under concurrent access (a
+  compare-and-exchange loop, rather than a lock or a best-effort counter).
+- **Rate limit sleeps are now as long as they need to be, and no longer.** Backends
+  report a real time-to-next-window, where `ex_rated` could only be given the
+  `window / limit` estimate this library computed for it. Expect the
+  `[:external_service, :rate_limit, :sleep]` telemetry to report different (and
+  more accurate) durations.
+
+### Removed
+- **The `ex_rated` dependency**, which has had no release since December 2021.
+  Rate limiting is now handled by the built-in `ExternalService.RateLimiter.Local`
+  or a backend of your choosing.
+
+  If your own code called `ExRated` directly — it was previously reaching you as a
+  transitive dependency — add `{:ex_rated, "~> 2.1"}` to your `deps`. Nothing in
+  the `ExternalService` API changes.
+
 ## [2.1.0] - 2026-07-30
 
 ### Added
