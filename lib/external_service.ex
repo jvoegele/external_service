@@ -55,12 +55,12 @@ defmodule ExternalService do
       * Metadata: `:service`
   """
 
+  alias ExternalService.CircuitBreaker
   alias ExternalService.CircuitBreakerOpen
-  alias ExternalService.RateLimit
+  alias ExternalService.RateLimiter
   alias ExternalService.RetriesExhausted
   alias ExternalService.RetryOptions
   alias ExternalService.ServiceNotStarted
-  alias :fuse, as: Fuse
 
   require Errata
   require Logger
@@ -114,6 +114,13 @@ defmodule ExternalService do
       doc:
         "If set to a rate between `0.0` and `1.0`, randomly fails that fraction of calls. " <>
           "Intended for testing how dependents behave when this service is degraded."
+    ],
+    backend: [
+      type: {:or, [:atom, {:tuple, [:atom, :keyword_list]}]},
+      doc:
+        "The circuit breaker implementation to use, either as a module or as a " <>
+          "`{module, options}` tuple whose options are passed through to that backend. " <>
+          "Defaults to the node-local `:fuse`-based breaker."
     ]
   ]
 
@@ -127,6 +134,13 @@ defmodule ExternalService do
       type: :pos_integer,
       required: true,
       doc: "Length of the rate-limiting window, in milliseconds."
+    ],
+    backend: [
+      type: {:or, [:atom, {:tuple, [:atom, :keyword_list]}]},
+      doc:
+        "The rate limiter implementation to use, either as a module or as a " <>
+          "`{module, options}` tuple whose options are passed through to that backend. " <>
+          "Defaults to the node-local ETS-based limiter."
     ]
   ]
 
@@ -168,12 +182,19 @@ defmodule ExternalService do
     # lock-free reads with no process to message or crash. This replaces the
     # previous unsupervised `Agent`.
 
-    defstruct [:service, :fuse_options, :rate_limit, :retry_options]
+    defstruct [:service, :circuit_breaker, :rate_limit, :retry_options]
 
-    def init(service, fuse_options, rate_limit, retry_options) do
+    @type t :: %__MODULE__{
+            service: ExternalService.service(),
+            circuit_breaker: ExternalService.CircuitBreaker.t(),
+            rate_limit: ExternalService.RateLimiter.t(),
+            retry_options: ExternalService.RetryOptions.t()
+          }
+
+    def init(service, circuit_breaker, rate_limit, retry_options) do
       state = %__MODULE__{
         service: service,
-        fuse_options: fuse_options,
+        circuit_breaker: circuit_breaker,
         rate_limit: rate_limit,
         retry_options: retry_options
       }
@@ -209,34 +230,19 @@ defmodule ExternalService do
   @spec start(service(), options()) :: :ok
   def start(service, options \\ []) do
     options = NimbleOptions.validate!(options, @start_schema)
-    circuit_breaker = options[:circuit_breaker]
 
-    fuse_opts = {fuse_strategy(circuit_breaker), {:reset, circuit_breaker[:reset]}}
-    :ok = Fuse.install(service, fuse_opts)
+    circuit_breaker = CircuitBreaker.install(service, options[:circuit_breaker])
 
     rate_limit =
-      RateLimit.new(
+      RateLimiter.new(
         service,
-        rate_limit_spec(options[:rate_limit]),
+        options[:rate_limit],
         Keyword.take(options, [:sleep_function])
       )
 
-    State.init(service, fuse_opts, rate_limit, RetryOptions.new(options[:retry]))
+    State.init(service, circuit_breaker, rate_limit, RetryOptions.new(options[:retry]))
     :ok
   end
-
-  defp fuse_strategy(circuit_breaker) do
-    tolerate = circuit_breaker[:tolerate]
-    within = circuit_breaker[:within]
-
-    case circuit_breaker[:fault_injection] do
-      nil -> {:standard, tolerate, within}
-      rate -> {:fault_injection, rate, tolerate, within}
-    end
-  end
-
-  defp rate_limit_spec(nil), do: nil
-  defp rate_limit_spec(rate_limit), do: {rate_limit[:limit], rate_limit[:per]}
 
   @doc """
   Stops the fuse for a specific service.
@@ -246,9 +252,13 @@ defmodule ExternalService do
   """
   @spec stop(service()) :: :ok
   def stop(service) do
-    # `:fuse.remove/1` returns `{:error, :not_found}` for an unknown fuse; treat
-    # that as success so that stop/1 is idempotent.
-    _ = Fuse.remove(service)
+    case State.fetch(service) do
+      {:ok, state} -> CircuitBreaker.remove(service, state.circuit_breaker)
+      # A service with no state was never started (or has already been stopped),
+      # so there is nothing to tear down — which is what makes stop/1 idempotent.
+      :error -> :ok
+    end
+
     State.delete(service)
     :ok
   end
@@ -259,7 +269,12 @@ defmodule ExternalService do
   After reset, the breaker will be closed with no recorded failures.
   """
   @spec reset(service()) :: :ok | {:error, :not_found}
-  def reset(service), do: Fuse.reset(service)
+  def reset(service) do
+    case State.fetch(service) do
+      {:ok, state} -> CircuitBreaker.reset(service, state.circuit_breaker)
+      :error -> {:error, :not_found}
+    end
+  end
 
   @doc """
   Returns `true` if the service is currently available, meaning its circuit
@@ -282,7 +297,7 @@ defmodule ExternalService do
       end
   """
   @spec available?(service()) :: boolean()
-  def available?(service), do: Fuse.ask(service, :sync) == :ok
+  def available?(service), do: circuit_breaker_state(service) == :ok
 
   @doc """
   Returns `true` if the service's circuit breaker is currently blown.
@@ -292,7 +307,16 @@ defmodule ExternalService do
   services that were never started.
   """
   @spec blown?(service()) :: boolean()
-  def blown?(service), do: Fuse.ask(service, :sync) == :blown
+  def blown?(service), do: circuit_breaker_state(service) == :blown
+
+  # A service that was never started has no breaker to ask, and is neither
+  # available nor blown.
+  defp circuit_breaker_state(service) do
+    case State.fetch(service) do
+      {:ok, state} -> CircuitBreaker.ask(service, state.circuit_breaker)
+      :error -> :not_started
+    end
+  end
 
   @doc """
   Returns `true` only if every service in `fuse_names` is `available?/1`.
@@ -353,8 +377,8 @@ defmodule ExternalService do
         {:no_retry, result} -> result
         {:error, :retry} -> {:error, retries_exhausted(service, :reason_unknown)}
         {:error, {:retry, reason}} -> {:error, retries_exhausted(service, reason)}
-        {:error, {:fuse_blown, service}} -> {:error, circuit_breaker_open(service)}
-        {:error, {:fuse_not_found, service}} -> {:error, service_not_started(service)}
+        {:error, {:circuit_breaker_open, service}} -> {:error, circuit_breaker_open(service)}
+        {:error, {:not_started, service}} -> {:error, service_not_started(service)}
       end
     end)
   end
@@ -377,8 +401,8 @@ defmodule ExternalService do
         {:no_retry, result} -> result
         {:error, :retry} -> raise retries_exhausted(service, :reason_unknown)
         {:error, {:retry, reason}} -> raise retries_exhausted(service, reason)
-        {:error, {:fuse_blown, service}} -> raise circuit_breaker_open(service)
-        {:error, {:fuse_not_found, service}} -> raise service_not_started(service)
+        {:error, {:circuit_breaker_open, service}} -> raise circuit_breaker_open(service)
+        {:error, {:not_started, service}} -> raise service_not_started(service)
       end
     end)
   end
@@ -476,22 +500,33 @@ defmodule ExternalService do
           {:no_retry, function_result :: any()}
           | {:error, :retry}
           | {:error, {:retry, reason :: any()}}
-          | {:error, {:fuse_blown, service()}}
-          | {:error, {:fuse_not_found, service()}}
+          | {:error, {:circuit_breaker_open, service()}}
+          | {:error, {:not_started, service()}}
   defp call_with_retry(service, retry_opts, function) do
+    # The service state is read once per call rather than once per attempt: it is
+    # written by `start/2` and never changes, and it is what tells us whether the
+    # service was started at all (the breaker backend only reports open/closed).
+    case State.fetch(service) do
+      :error ->
+        log_service_not_started(service)
+        {:error, {:not_started, service}}
+
+      {:ok, state} ->
+        call_with_retry(service, state, retry_opts, function)
+    end
+  end
+
+  defp call_with_retry(service, state, retry_opts, function) do
     require Retry
 
     Retry.retry with: apply_retry_options(retry_opts), rescue_only: retry_opts.retry_exceptions do
-      case Fuse.ask(service, :sync) do
+      case CircuitBreaker.ask(service, state.circuit_breaker) do
         :ok ->
-          try_function(service, retry_opts, function)
+          try_function(service, state, retry_opts, function)
 
         :blown ->
           emit_blown(service)
           throw(:blown)
-
-        {:error, :not_found} ->
-          throw(:not_found)
       end
     after
       {:no_retry, _} = result -> result
@@ -502,11 +537,7 @@ defmodule ExternalService do
     end
   catch
     :blown ->
-      {:error, {:fuse_blown, service}}
-
-    :not_found ->
-      log_service_not_started(service)
-      {:error, {:fuse_not_found, service}}
+      {:error, {:circuit_breaker_open, service}}
   end
 
   defp apply_retry_options(retry_opts) do
@@ -545,24 +576,22 @@ defmodule ExternalService do
        when is_integer(max_attempts) and max_attempts > 0,
        do: Stream.take(stream, max_attempts - 1)
 
-  @spec try_function(service, RetryOptions.t(), retriable_function) ::
+  @spec try_function(service, State.t(), RetryOptions.t(), retriable_function) ::
           {:error, {:retry, any}} | {:error, :retry} | {:no_retry, any} | no_return
-  defp try_function(service, retry_opts, function) do
-    rate_limit = State.get(service).rate_limit
-
-    case RateLimit.call(rate_limit, function) do
+  defp try_function(service, state, retry_opts, function) do
+    case RateLimiter.call(state.rate_limit, function) do
       {:retry, reason} ->
         emit_retry(service, reason)
-        Fuse.melt(service)
+        melt(service, state)
         {:error, {:retry, reason}}
 
       :retry ->
         emit_retry(service, :reason_unknown)
-        Fuse.melt(service)
+        melt(service, state)
         {:error, :retry}
 
       result ->
-        maybe_retry_on_result(service, retry_opts.retry_on, result)
+        maybe_retry_on_result(service, state, retry_opts.retry_on, result)
     end
   rescue
     error ->
@@ -572,23 +601,25 @@ defmodule ExternalService do
       # both retrying and melting.
       if retriable_exception?(error, retry_opts.retry_exceptions) do
         emit_retry(service, error)
-        Fuse.melt(service)
+        melt(service, state)
       end
 
       reraise error, __STACKTRACE__
   end
+
+  defp melt(service, state), do: CircuitBreaker.melt(service, state.circuit_breaker)
 
   # When a `:retry_on` predicate is configured, a result it matches is treated as a
   # retry — melting the breaker and using the result itself as the retry reason —
   # exactly like an explicit `:retry` return (which is handled before we get here,
   # so an explicit return always takes precedence). With no predicate, or when it
   # does not match, the result is returned untouched.
-  defp maybe_retry_on_result(_service, nil, result), do: {:no_retry, result}
+  defp maybe_retry_on_result(_service, _state, nil, result), do: {:no_retry, result}
 
-  defp maybe_retry_on_result(service, predicate, result) when is_function(predicate, 1) do
+  defp maybe_retry_on_result(service, state, predicate, result) when is_function(predicate, 1) do
     if predicate.(result) do
       emit_retry(service, result)
-      Fuse.melt(service)
+      melt(service, state)
       {:error, {:retry, result}}
     else
       {:no_retry, result}

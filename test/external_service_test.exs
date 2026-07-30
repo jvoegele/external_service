@@ -275,7 +275,7 @@ defmodule ExternalServiceTest do
 
     test "calls sleep function when rate limit is reached" do
       fuse_name = "sleep test fuse"
-      bucket = ExternalService.RateLimit.bucket_name(fuse_name)
+      bucket = ExternalService.RateLimiter.ExRated.bucket_name(fuse_name)
 
       Process.put(:call_count, 0)
 
@@ -781,7 +781,7 @@ defmodule ExternalServiceTest do
 
     test "emits a rate_limit sleep event when throttled" do
       name = :"telemetry-rate-limit"
-      bucket = ExternalService.RateLimit.bucket_name(name)
+      bucket = ExternalService.RateLimiter.ExRated.bucket_name(name)
       sleep = fn _time -> ExRated.delete_bucket(bucket) end
 
       ExternalService.start(name,
