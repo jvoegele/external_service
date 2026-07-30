@@ -160,5 +160,7 @@ MyApp.Stripe.reset()
     internal `ExternalService.RateLimit` would rename accordingly). A rate-limit
     *read* helper on the `ExternalService` facade (symmetric with `available?`)
     is the lightweight option if demand appears sooner.
-- `Flow`-based `call_async_stream` option (#27).
-- Decorator-based annotations for marking external calls (#28).
+- ~~`Flow`-based `call_async_stream` option (#27)~~ — shipped in 2.1.0 as
+  `ExternalService.Flow`.
+- ~~Decorator-based annotations for marking external calls (#28)~~ — shipped in
+  2.1.0 as `ExternalService.Decorator`.
