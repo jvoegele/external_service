@@ -108,6 +108,49 @@ MyApp.Api.reset()        # force closed
 ExternalService.all_available?([:a, :b])
 ```
 
+## Rate limit config
+{: .col-2}
+
+### Options
+
+```elixir
+rate_limit: [
+  limit: 100,               # calls per window
+  per: :timer.seconds(1),   # window ms
+  wait: :infinity           # :infinity | ms | false
+]
+```
+
+Burst up to `limit`, then paced at `per / limit`.
+
+### Bound the wait
+
+```elixir
+rate_limit: [limit: 100, per: 1_000, wait: 2_000]
+
+# budget exhausted -> function never runs:
+{:error, %ExternalService.RateLimited{
+  context: %{retry_after: ms}}}   # http_status 429
+```
+
+`wait: false` fails immediately. Never melts the breaker; never retried.
+
+### Share a limit across a cluster
+
+```elixir
+defmodule MyApp.RateLimit do
+  use Hammer, backend: Hammer.Redis
+end
+
+rate_limit: [
+  limit: 100, per: 1_000,
+  backend: {ExternalService.RateLimiter.Hammer,
+            module: MyApp.RateLimit}
+]
+```
+
+Default backend is node-local: N nodes ⇒ up to N × `limit`.
+
 ## Retry options
 {: .col-2}
 
@@ -154,6 +197,7 @@ case MyApp.Api.fetch(id) do
   {:ok, v} -> v
   {:error, %ExternalService.RetriesExhausted{}} -> degrade()
   {:error, %ExternalService.CircuitBreakerOpen{}} -> degrade()
+  {:error, %ExternalService.RateLimited{}} -> shed()
   {:error, reason} -> {:error, reason}  # your own error
 end
 ```

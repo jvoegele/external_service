@@ -6,10 +6,6 @@ defmodule ExternalServiceTest do
   alias ExternalService.RetryOptions
   alias ExternalService.ServiceNotStarted
 
-  # Aliased under a distinct name because these tests also drive the `ex_rated`
-  # library directly (`ExRated.delete_bucket/1`) to clear the rate-limit window.
-  alias ExternalService.RateLimiter.ExRated, as: ExRatedBackend
-
   @moduletag capture_log: true
 
   @fuse_name :"test-fuse"
@@ -278,37 +274,39 @@ defmodule ExternalServiceTest do
     end
 
     test "calls sleep function when rate limit is reached" do
-      fuse_name = "sleep test fuse"
-      bucket = ExRatedBackend.bucket_name(fuse_name)
+      service = "sleep test service"
 
       Process.put(:call_count, 0)
 
-      sleep = fn _time ->
+      sleep = fn time ->
         Process.put(:sleep_fired, true)
-        # Clear the rate-limit window so the throttled call proceeds immediately.
-        # The previous version relied on a tiny (10ms) window elapsing during the
-        # calls, which made this test flaky on slow CI runners where the calls
-        # straddled the window and the limit was never reached.
-        ExRated.delete_bucket(bucket)
+        # The limiter admits calls against a real clock, so the stub has to let
+        # the time actually pass for a throttled call to make progress.
+        Process.sleep(time)
       end
 
-      # A wide window guarantees that all 10 calls fall within a single window,
-      # so the limit is reliably reached on the 6th call regardless of timing.
-      ExternalService.start(fuse_name,
-        rate_limit: [limit: 5, per: :timer.minutes(1)],
+      # The token bucket's burst capacity is exactly `:limit`, so the first five
+      # calls go straight through and the sixth is throttled. A short window
+      # keeps the resulting sleeps (one emission interval, 10ms) brief.
+      ExternalService.start(service,
+        rate_limit: [limit: 5, per: 50],
         sleep_function: sleep
       )
 
-      for i <- 1..10 do
-        ExternalService.call(fuse_name, fn ->
-          unless Process.get(:sleep_fired) do
-            Process.put(:call_count, Process.get(:call_count) + 1)
-          end
+      on_exit(fn -> ExternalService.stop(service) end)
 
-          i
-        end)
-      end
+      results =
+        for i <- 1..10 do
+          ExternalService.call(service, fn ->
+            unless Process.get(:sleep_fired) do
+              Process.put(:call_count, Process.get(:call_count) + 1)
+            end
 
+            i
+          end)
+        end
+
+      assert results == Enum.to_list(1..10)
       assert Process.get(:sleep_fired) == true
       assert Process.get(:call_count) == 5
     end
@@ -785,12 +783,12 @@ defmodule ExternalServiceTest do
 
     test "emits a rate_limit sleep event when throttled" do
       name = :"telemetry-rate-limit"
-      bucket = ExRatedBackend.bucket_name(name)
-      sleep = fn _time -> ExRated.delete_bucket(bucket) end
 
+      # One call per 50ms window, so the second call is throttled for a single
+      # emission interval before it is admitted.
       ExternalService.start(name,
-        rate_limit: [limit: 1, per: :timer.minutes(1)],
-        sleep_function: sleep
+        rate_limit: [limit: 1, per: 50],
+        sleep_function: &Process.sleep/1
       )
 
       on_exit(fn -> ExternalService.stop(name) end)

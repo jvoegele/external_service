@@ -48,13 +48,16 @@ defmodule ExternalService.Mixfile do
     [
       {:fuse, "~> 2.5"},
       {:retry, "~> 0.18"},
-      {:ex_rated, "~> 2.1"},
       {:deep_merge, "~> 1.0"},
       {:decorator, "~> 1.4"},
       {:errata, "~> 1.3"},
       {:flow, "~> 1.2", optional: true},
       {:nimble_options, "~> 1.1"},
       {:telemetry, "~> 1.0"},
+      # Only used to verify the ExternalService.RateLimiter.Hammer adapter against
+      # the real library; the adapter itself calls `hit/3` on a module you supply,
+      # so Hammer is not a dependency of this library at runtime.
+      {:hammer, "~> 7.0", only: :test},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}

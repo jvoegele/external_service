@@ -1,19 +1,44 @@
 defmodule ExternalService.CircuitBreaker do
-  @moduledoc false
+  @moduledoc """
+  The behaviour implemented by circuit breaker backends.
 
-  # The circuit breaker seam.
-  #
-  # `ExternalService` never talks to a circuit-breaker implementation directly;
-  # every operation goes through this module, which dispatches to the backend
-  # configured for the service. The default backend,
-  # `ExternalService.CircuitBreaker.Fuse`, wraps the `:fuse` library and preserves
-  # the behavior of every previous release.
-  #
-  # Backends are *stateless modules*: `install/2` returns an opaque config term
-  # that is stored alongside the rest of the service state (in `:persistent_term`)
-  # and handed back to every other callback. A backend therefore needs no process,
-  # no supervision tree, and no registry of its own — which is what lets a
-  # cluster-aware backend be a drop-in replacement.
+  A service's breaker is chosen with the `:backend` circuit breaker option, and
+  defaults to `ExternalService.CircuitBreaker.Fuse` — a node-local breaker built
+  on the [`:fuse`](https://github.com/jlouis/fuse) library.
+
+  ## Writing a backend
+
+      defmodule MyApp.CircuitBreaker do
+        @behaviour ExternalService.CircuitBreaker
+
+        @impl true
+        def install(service, options) do
+          {:ok, %{key: service, tolerate: options[:tolerate]}}
+        end
+
+        @impl true
+        def ask(_service, config), do: if MyStore.open?(config.key), do: :blown, else: :ok
+
+        @impl true
+        def melt(_service, config), do: MyStore.record_failure(config.key)
+
+        @impl true
+        def reset(_service, config), do: MyStore.close(config.key)
+
+        @impl true
+        def remove(_service, config), do: MyStore.forget(config.key)
+      end
+
+  Backends are **stateless modules**. `c:install/2` returns an opaque config term
+  that is stored with the rest of the service state (in `:persistent_term`) and
+  handed back to every other callback, so a backend needs no process, supervisor,
+  or registry of its own.
+
+  This library never calls these functions on your behalf outside a guarded call.
+  The user-facing view of a breaker stays at the level of
+  `ExternalService.available?/1`, `ExternalService.blown?/1`, and
+  `ExternalService.reset/1` — the concept, not the individual operations.
+  """
 
   @type service :: ExternalService.service()
 
@@ -50,10 +75,14 @@ defmodule ExternalService.CircuitBreaker do
 
   @default_backend ExternalService.CircuitBreaker.Fuse
 
-  @doc "The backend used when no `:backend` option is given."
+  # The functions below dispatch to a backend on `ExternalService`'s behalf. They
+  # are not part of the public API: only the behaviour above is public.
+
+  @doc false
   @spec default_backend() :: module()
   def default_backend, do: @default_backend
 
+  @doc false
   @spec install(service(), keyword()) :: t()
   def install(service, options) do
     {module, options} = split_backend(options)
@@ -61,15 +90,19 @@ defmodule ExternalService.CircuitBreaker do
     {module, config}
   end
 
+  @doc false
   @spec ask(service(), t()) :: :ok | :blown
   def ask(service, {module, config}), do: module.ask(service, config)
 
+  @doc false
   @spec melt(service(), t()) :: :ok
   def melt(service, {module, config}), do: module.melt(service, config)
 
+  @doc false
   @spec reset(service(), t()) :: :ok | {:error, :not_found}
   def reset(service, {module, config}), do: module.reset(service, config)
 
+  @doc false
   @spec remove(service(), t()) :: :ok
   def remove(service, {module, config}), do: module.remove(service, config)
 

@@ -117,6 +117,73 @@ defmodule ExternalService.BackendTest do
     end
   end
 
+  describe "rate limit wait budget" do
+    test "a throttled call returns RateLimited without melting the circuit breaker" do
+      service = unique_service()
+
+      :ok =
+        ExternalService.start(service,
+          rate_limit: [limit: 1, per: :timer.minutes(1), wait: false]
+        )
+
+      on_exit(fn -> ExternalService.stop(service) end)
+
+      assert ExternalService.call(service, fn -> :first end) == :first
+
+      assert {:error, %ExternalService.RateLimited{context: context}} =
+               ExternalService.call(service, fn -> flunk("should not have run") end)
+
+      assert context.service == service
+      assert is_integer(context.retry_after)
+
+      # Being throttled is this library's own back-pressure, not a failure of the
+      # external service, so it must leave the breaker alone.
+      assert ExternalService.available?(service)
+    end
+
+    test "call!/3 raises RateLimited" do
+      service = unique_service()
+
+      :ok =
+        ExternalService.start(service,
+          rate_limit: [limit: 1, per: :timer.minutes(1), wait: false]
+        )
+
+      on_exit(fn -> ExternalService.stop(service) end)
+
+      assert ExternalService.call!(service, fn -> :first end) == :first
+
+      assert_raise ExternalService.RateLimited, fn ->
+        ExternalService.call!(service, fn -> flunk("should not have run") end)
+      end
+    end
+
+    test "a throttled call is not retried" do
+      service = unique_service()
+
+      :ok =
+        ExternalService.start(service,
+          rate_limit: [limit: 1, per: :timer.minutes(1), wait: false],
+          retry: [max_attempts: 5, base: 1]
+        )
+
+      on_exit(fn -> ExternalService.stop(service) end)
+
+      assert ExternalService.call(service, fn -> :first end) == :first
+
+      Process.put(:attempts, 0)
+
+      assert {:error, %ExternalService.RateLimited{}} =
+               ExternalService.call(service, fn ->
+                 Process.put(:attempts, Process.get(:attempts) + 1)
+                 :ok
+               end)
+
+      # Retrying a throttled call would only be throttled again.
+      assert Process.get(:attempts) == 0
+    end
+  end
+
   describe "option validation" do
     test "rejects a backend that is neither a module nor a {module, options} tuple" do
       assert_raise NimbleOptions.ValidationError, fn ->

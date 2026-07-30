@@ -46,9 +46,9 @@ managing the underlying fuse for you — you never call `:fuse.ask` or
 ### Rate limiting
 
 Many services impose a request quota. `ExternalService` can keep you under it
-automatically and application-wide, using
-[ex_rated](https://hex.pm/packages/ex_rated): excess calls sleep until the window
-allows them, rather than failing. See [Rate limiting](rate-limiting.md).
+automatically and application-wide with a built-in token bucket: excess calls
+sleep until there is room, rather than failing. A pluggable backend enforces the
+limit across a whole cluster. See [Rate limiting](rate-limiting.md).
 
 ## History
 
