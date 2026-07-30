@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-30
+
 This line makes `ExternalService` work correctly on more than one node. See the
 new [Distributed Elixir](guides/distributed.md) guide for the full picture.
 
@@ -283,7 +285,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/2.1.0...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/2.2.0...HEAD
+[2.2.0]: https://github.com/jvoegele/external_service/compare/2.1.0...2.2.0
 [2.1.0]: https://github.com/jvoegele/external_service/compare/2.0.0...2.1.0
 [2.0.0]: https://github.com/jvoegele/external_service/compare/1.1.4...2.0.0
 [1.1.2]: https://github.com/jvoegele/external_service/compare/1.1.1...1.1.2
