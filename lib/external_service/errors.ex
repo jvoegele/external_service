@@ -31,6 +31,34 @@ defmodule ExternalService.CircuitBreakerOpen do
     default_message: "the circuit breaker for the external service is open"
 end
 
+defmodule ExternalService.RateLimited do
+  @moduledoc """
+  Raised or returned when a call could not be made within the service's
+  configured rate limit `:wait` budget.
+
+  This is an [Errata](https://hexdocs.pm/errata) infrastructure error. The same
+  value is returned in an `{:error, error}` tuple by `ExternalService.call/3` and
+  raised by `ExternalService.call!/3`.
+
+  Its `:context` contains:
+
+    * `:service` — the service the call was made against.
+    * `:retry_after` — milliseconds until the call would have been admitted, as
+      reported by the rate limiter backend.
+
+  Only services configured with `rate_limit: [wait: ...]` can produce this error;
+  the default (`wait: :infinity`) waits as long as it takes. Because the wrapped
+  function never ran, this does *not* melt the circuit breaker and is not
+  retried — retrying immediately would only be throttled again.
+  """
+  use Errata.InfrastructureError,
+    default_message: "the call was throttled beyond the configured rate limit wait time"
+
+  # Rate limiting maps naturally onto "Too Many Requests" rather than the default
+  # infrastructure-error status (503).
+  def http_status(_error), do: 429
+end
+
 defmodule ExternalService.ServiceNotStarted do
   @moduledoc """
   Raised or returned when a call is made to a service that has not been started

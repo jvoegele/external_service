@@ -1,15 +1,51 @@
 defmodule ExternalService.RateLimiter do
-  @moduledoc false
+  @moduledoc """
+  The behaviour implemented by rate limiter backends.
 
-  # The rate limiter seam, and the runtime that drives it.
-  #
-  # A backend answers exactly one question — may a call proceed right now, and if
-  # not, how long until it may? Everything else (sleeping, telemetry, logging) is
-  # handled here, so that backends stay small and consistent.
-  #
-  # Like circuit breaker backends, rate limiter backends are *stateless modules*:
-  # `init/2` returns an opaque config term that is stored with the rest of the
-  # service state and handed back to `check/2`.
+  A service's limiter is chosen with the `:backend` rate limit option, and
+  defaults to `ExternalService.RateLimiter.Local`. `ExternalService.RateLimiter.Hammer`
+  meters against a [Hammer](https://hexdocs.pm/hammer) module, which is the
+  supported route to a limit shared across a cluster.
+
+  ## Writing a backend
+
+  A backend answers exactly one question: may a call proceed right now, and if
+  not, how long until it may? Everything else — sleeping, honoring the `:wait`
+  budget, telemetry, logging — is handled for you, so that every backend behaves
+  consistently.
+
+      defmodule MyApp.RateLimiter do
+        @behaviour ExternalService.RateLimiter
+
+        @impl true
+        def init(service, options) do
+          {:ok, %{key: service, limit: options[:limit], window: options[:per]}}
+        end
+
+        @impl true
+        def check(_service, config) do
+          case MyStore.increment(config.key, config.window, config.limit) do
+            {:ok, _count} -> :ok
+            {:throttled, milliseconds} -> {:wait, milliseconds}
+          end
+        end
+      end
+
+  Then point a service at it:
+
+      use ExternalService,
+        rate_limit: [limit: 100, per: 1_000, backend: {MyApp.RateLimiter, some: :option}]
+
+  Backends are **stateless modules**. `c:init/2` returns an opaque config term
+  that is stored with the rest of the service state and handed back to every
+  `c:check/2` call, so a backend needs no process, supervisor, or registry of its
+  own. Anything mutable it needs — an `:atomics` reference, a connection pool
+  name, a remote key — travels in that term.
+
+  Report a real time-to-next-window from `c:check/2` where you can. Callers sleep
+  for exactly as long as you say, so an accurate answer paces calls precisely and
+  makes the `:wait` budget meaningful.
+  """
 
   require Logger
 
@@ -43,24 +79,42 @@ defmodule ExternalService.RateLimiter do
   """
   @callback check(service(), config()) :: :ok | {:wait, non_neg_integer()}
 
-  @default_backend ExternalService.RateLimiter.ExRated
+  @default_backend ExternalService.RateLimiter.Local
 
-  defstruct [:service, :backend, :config, :sleep]
+  @typedoc """
+  How long a throttled call may wait before giving up.
 
-  @doc "The backend used when no `:backend` option is given."
+  `:infinity` waits as long as the limiter requires, `false` never waits, and an
+  integer is a millisecond budget for the whole call.
+  """
+  @type wait :: :infinity | false | non_neg_integer()
+
+  @typedoc """
+  Returned by `call/2` when the wait budget was exhausted before the call could
+  be admitted, carrying the milliseconds still remaining.
+  """
+  @type rate_limited :: {__MODULE__, :rate_limited, non_neg_integer()}
+
+  defstruct [:service, :backend, :config, :sleep, wait: :infinity]
+
+  # The functions below drive backends on `ExternalService`'s behalf. They are
+  # not part of the public API: the supported way to reach a rate limiter is by
+  # configuring a service and calling it. Only the behaviour above is public.
+
+  @doc false
   @spec default_backend() :: module()
   def default_backend, do: @default_backend
 
-  @doc """
-  Builds the rate limiter for a service, or `nil` when no `:rate_limit` options
-  were given.
-  """
+  @doc false
   @spec new(service(), keyword() | nil, keyword()) :: t()
   def new(service, options, opts \\ [])
 
   def new(_service, nil, _opts), do: nil
 
   def new(service, options, opts) when is_list(options) do
+    # `:wait` governs the runtime rather than the backend, so it is taken out
+    # before the remaining options are handed over.
+    {wait, options} = Keyword.pop(options, :wait, :infinity)
     {module, options} = split_backend(options)
     {:ok, config} = module.init(service, options)
 
@@ -68,31 +122,46 @@ defmodule ExternalService.RateLimiter do
       service: service,
       backend: module,
       config: config,
+      wait: wait,
       sleep: Keyword.get(opts, :sleep_function, &Process.sleep/1)
     }
   end
 
-  @doc """
-  Invokes `function`, first waiting as long as the rate limit requires.
-  """
-  @spec call(t(), (-> any())) :: any()
+  @doc false
+  @spec call(t(), (-> any())) :: any() | rate_limited()
   def call(nil, function) when is_function(function, 0), do: function.()
 
   def call(%__MODULE__{} = rate_limiter, function) when is_function(function, 0),
-    do: call(rate_limiter, function, 0)
+    do: call(rate_limiter, function, deadline(rate_limiter.wait), 0)
 
-  defp call(%__MODULE__{backend: module, config: config} = rate_limiter, function, sleep_count) do
+  defp call(%__MODULE__{backend: module, config: config} = rate_limiter, fun, deadline, count) do
     case module.check(rate_limiter.service, config) do
       :ok ->
-        function.()
+        fun.()
 
       {:wait, sleep_time} ->
-        emit_sleep(rate_limiter.service, sleep_time)
-        log_sleep(rate_limiter.service, sleep_time, sleep_count)
-        rate_limiter.sleep.(sleep_time)
-        call(rate_limiter, function, sleep_count + 1)
+        if past_deadline?(deadline, sleep_time) do
+          {__MODULE__, :rate_limited, sleep_time}
+        else
+          emit_sleep(rate_limiter.service, sleep_time)
+          log_sleep(rate_limiter.service, sleep_time, count)
+          rate_limiter.sleep.(sleep_time)
+          call(rate_limiter, fun, deadline, count + 1)
+        end
     end
   end
+
+  # The budget covers the whole call rather than any single sleep, so it is
+  # resolved once into a monotonic deadline and then compared against.
+  defp deadline(:infinity), do: :infinity
+  defp deadline(false), do: :none
+  defp deadline(milliseconds), do: System.monotonic_time(:millisecond) + milliseconds
+
+  defp past_deadline?(:infinity, _sleep_time), do: false
+  defp past_deadline?(:none, _sleep_time), do: true
+
+  defp past_deadline?(deadline, sleep_time),
+    do: System.monotonic_time(:millisecond) + sleep_time > deadline
 
   # `:backend` accepts either a bare module or a `{module, options}` tuple, with
   # the backend-specific options merged over the shared rate-limit options.

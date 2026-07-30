@@ -1,12 +1,17 @@
 defmodule ExternalService.CircuitBreaker.Fuse do
-  @moduledoc false
+  @moduledoc """
+  The default circuit breaker backend, built on the
+  [`:fuse`](https://github.com/jlouis/fuse) library.
 
-  # The default circuit breaker backend: a thin wrapper over the `:fuse` library.
-  #
-  # This is the node-local breaker that `ExternalService` has always used. Each
-  # node counts its own failures and opens its own breaker; see
-  # `ExternalService.CircuitBreaker.Cluster` for a variant that propagates trips
-  # across a cluster.
+  This is the breaker `ExternalService` has always used, and you get it without
+  configuring anything. It is **node-local**: each node counts its own failures
+  and opens its own breaker, which is usually what you want — a node with a bad
+  network path should stop calling the service without taking the rest of the
+  cluster down with it.
+
+  It is configured through the ordinary `:circuit_breaker` options (`:tolerate`,
+  `:within`, `:reset`, `:fault_injection`); see `ExternalService.start/2`.
+  """
 
   @behaviour ExternalService.CircuitBreaker
 

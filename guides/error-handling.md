@@ -21,11 +21,13 @@ infrastructure errors. The same struct is _returned_ by `call/3` (inside an
 | `ExternalService.RetriesExhausted`   | retries (count or time budget) were exhausted             | `503`           |
 | `ExternalService.CircuitBreakerOpen` | a call was rejected because the breaker is open           | `503`           |
 | `ExternalService.ServiceNotStarted`  | a call was made to a service never started with `start/2` | `500`           |
+| `ExternalService.RateLimited`        | a call was throttled beyond the rate limit `:wait` budget | `429`           |
 
 Each carries a `:context` map that always includes the `:service` it relates to.
 `RetriesExhausted` additionally carries `:context.reason` — the value from the
 function's last `{:retry, reason}` return, or `:reason_unknown` if it returned a
-bare `:retry`.
+bare `:retry`. `RateLimited` carries `:context.retry_after`, the milliseconds
+until the call would have been admitted.
 
 ```elixir
 {:error, %ExternalService.RetriesExhausted{context: %{service: svc, reason: reason}}} ->
@@ -35,8 +37,12 @@ bare `:retry`.
 Because they are Errata infrastructure errors, they also come with an
 `http_status/1` and JSON encoding for free — convenient for turning a failure
 into an HTTP response or a structured log entry. `ServiceNotStarted` maps to
-`500` (it signals a configuration/programming mistake, not a transient outage);
-the other two map to `503`.
+`500` (it signals a configuration/programming mistake, not a transient outage)
+and `RateLimited` to `429`; the other two map to `503`.
+
+`RateLimited` only appears for services configured with `rate_limit: [wait: ...]`
+— by default a throttled call waits as long as it takes rather than failing. See
+the [Rate limiting](rate-limiting.md) guide.
 
 ## `call` — errors as values
 

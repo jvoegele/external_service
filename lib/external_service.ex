@@ -57,6 +57,7 @@ defmodule ExternalService do
 
   alias ExternalService.CircuitBreaker
   alias ExternalService.CircuitBreakerOpen
+  alias ExternalService.RateLimited
   alias ExternalService.RateLimiter
   alias ExternalService.RetriesExhausted
   alias ExternalService.RetryOptions
@@ -77,8 +78,12 @@ defmodule ExternalService do
   @typedoc "Error returned when a service has not been started with `ExternalService.start/2`"
   @type service_not_started :: {:error, ServiceNotStarted.t()}
 
+  @typedoc "Error returned when a call is throttled beyond the rate limit `:wait` budget"
+  @type rate_limited :: {:error, RateLimited.t()}
+
   @typedoc "Union type representing all the possible error return values"
-  @type error :: retries_exhausted | circuit_breaker_open | service_not_started
+  @type error ::
+          retries_exhausted | circuit_breaker_open | service_not_started | rate_limited
 
   @type retriable_function_result ::
           :retry | {:retry, reason :: any()} | (function_result :: any())
@@ -135,12 +140,23 @@ defmodule ExternalService do
       required: true,
       doc: "Length of the rate-limiting window, in milliseconds."
     ],
+    wait: [
+      type: {:or, [{:in, [:infinity, false]}, :non_neg_integer]},
+      default: :infinity,
+      doc:
+        "How long a throttled call may wait for the rate limit to admit it. " <>
+          "`:infinity` (the default) waits as long as it takes, `false` never waits, and " <>
+          "an integer is a millisecond budget for the whole call. When the budget runs " <>
+          "out the call is not made and an `ExternalService.RateLimited` error is " <>
+          "returned (or raised by `call!/3`)."
+    ],
     backend: [
       type: {:or, [:atom, {:tuple, [:atom, :keyword_list]}]},
       doc:
         "The rate limiter implementation to use, either as a module or as a " <>
           "`{module, options}` tuple whose options are passed through to that backend. " <>
-          "Defaults to the node-local ETS-based limiter."
+          "Defaults to `ExternalService.RateLimiter.Local`. Use " <>
+          "`ExternalService.RateLimiter.Hammer` for a limit shared across a cluster."
     ]
   ]
 
@@ -379,6 +395,7 @@ defmodule ExternalService do
         {:error, {:retry, reason}} -> {:error, retries_exhausted(service, reason)}
         {:error, {:circuit_breaker_open, service}} -> {:error, circuit_breaker_open(service)}
         {:error, {:not_started, service}} -> {:error, service_not_started(service)}
+        {:error, {:rate_limited, service, after_ms}} -> {:error, rate_limited(service, after_ms)}
       end
     end)
   end
@@ -403,6 +420,7 @@ defmodule ExternalService do
         {:error, {:retry, reason}} -> raise retries_exhausted(service, reason)
         {:error, {:circuit_breaker_open, service}} -> raise circuit_breaker_open(service)
         {:error, {:not_started, service}} -> raise service_not_started(service)
+        {:error, {:rate_limited, service, after_ms}} -> raise rate_limited(service, after_ms)
       end
     end)
   end
@@ -502,6 +520,7 @@ defmodule ExternalService do
           | {:error, {:retry, reason :: any()}}
           | {:error, {:circuit_breaker_open, service()}}
           | {:error, {:not_started, service()}}
+          | {:error, {:rate_limited, service(), non_neg_integer()}}
   defp call_with_retry(service, retry_opts, function) do
     # The service state is read once per call rather than once per attempt: it is
     # written by `start/2` and never changes, and it is what tells us whether the
@@ -538,6 +557,9 @@ defmodule ExternalService do
   catch
     :blown ->
       {:error, {:circuit_breaker_open, service}}
+
+    {:rate_limited, retry_after} ->
+      {:error, {:rate_limited, service, retry_after}}
   end
 
   defp apply_retry_options(retry_opts) do
@@ -580,6 +602,12 @@ defmodule ExternalService do
           {:error, {:retry, any}} | {:error, :retry} | {:no_retry, any} | no_return
   defp try_function(service, state, retry_opts, function) do
     case RateLimiter.call(state.rate_limit, function) do
+      # The wrapped function never ran, so there is nothing to retry and no
+      # failure to hold against the circuit breaker. Thrown rather than returned
+      # so that it escapes the retry loop rather than being treated as a result.
+      {RateLimiter, :rate_limited, retry_after} ->
+        throw({:rate_limited, retry_after})
+
       {:retry, reason} ->
         emit_retry(service, reason)
         melt(service, state)
@@ -644,6 +672,10 @@ defmodule ExternalService do
 
   defp service_not_started(service) do
     Errata.create(ServiceNotStarted, context: %{service: service})
+  end
+
+  defp rate_limited(service, retry_after) do
+    Errata.create(RateLimited, context: %{service: service, retry_after: retry_after})
   end
 
   defp call_span(service, fun) do
