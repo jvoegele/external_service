@@ -6,6 +6,10 @@ defmodule ExternalServiceTest do
   alias ExternalService.RetryOptions
   alias ExternalService.ServiceNotStarted
 
+  # Aliased under a distinct name because these tests also drive the `ex_rated`
+  # library directly (`ExRated.delete_bucket/1`) to clear the rate-limit window.
+  alias ExternalService.RateLimiter.ExRated, as: ExRatedBackend
+
   @moduletag capture_log: true
 
   @fuse_name :"test-fuse"
@@ -275,7 +279,7 @@ defmodule ExternalServiceTest do
 
     test "calls sleep function when rate limit is reached" do
       fuse_name = "sleep test fuse"
-      bucket = ExternalService.RateLimiter.ExRated.bucket_name(fuse_name)
+      bucket = ExRatedBackend.bucket_name(fuse_name)
 
       Process.put(:call_count, 0)
 
@@ -781,7 +785,7 @@ defmodule ExternalServiceTest do
 
     test "emits a rate_limit sleep event when throttled" do
       name = :"telemetry-rate-limit"
-      bucket = ExternalService.RateLimiter.ExRated.bucket_name(name)
+      bucket = ExRatedBackend.bucket_name(name)
       sleep = fn _time -> ExRated.delete_bucket(bucket) end
 
       ExternalService.start(name,
