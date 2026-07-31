@@ -5,17 +5,26 @@
 - Core API and behavior live in `lib/external_service.ex`.
 - Supporting modules:
   - `lib/external_service/retry_options.ex`
-  - `lib/external_service/rate_limit.ex`
-  - `lib/external_service/gateway.ex`
+  - `lib/external_service/errors.ex` — Errata-based structured error types.
+  - `lib/external_service/circuit_breaker.ex` — breaker behaviour, with the
+    `Fuse` (default) and `Cluster` backends under `circuit_breaker/`.
+  - `lib/external_service/rate_limiter.ex` — limiter behaviour, with the
+    `Local` (default, GCRA) and `Hammer` backends under `rate_limiter/`.
+  - `lib/external_service/decorator.ex` — `@decorate external_call` annotations.
+  - `lib/external_service/flow.ex` — optional `:flow` integration.
+  - `lib/external_service/gateway.ex` — deprecated 1.x front door.
 
 ## Repository structure
 - `lib/` — library source code.
 - `test/` — ExUnit test suite.
   - `test/external_service_test.exs` covers the main `ExternalService` module.
-  - `test/external_service/` contains focused tests for gateway and rate limiting.
+  - `test/external_service/` contains focused tests per module (front door,
+    decorator, backends, rate limiters, cluster breaker, control API).
+  - `test/support/` holds helpers compiled only in `:test`.
 - `config/config.exs` — project configuration.
-- `README.md` — detailed usage docs and examples.
-- `doc/` — additional documentation assets.
+- `README.md` — overview that links into `guides/`.
+- `guides/` — the user-facing documentation, published as ExDoc extras.
+- `doc/` — generated docs output.
 
 ## Common development commands
 - Install dependencies:
