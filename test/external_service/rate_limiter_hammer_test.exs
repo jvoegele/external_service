@@ -71,6 +71,40 @@ defmodule ExternalService.RateLimiter.HammerTest do
     end
   end
 
+  describe "peek/2" do
+    test "reports availability without consuming any of the budget" do
+      {:ok, config} =
+        HammerBackend.init(unique_service(),
+          limit: 3,
+          per: :timer.minutes(1),
+          module: HammerLimiter
+        )
+
+      # Hammer's hit/3 both checks and consumes, so peek is assembled from get/2
+      # and expires_at/2 — worth proving it really does not spend anything.
+      Enum.each(1..50, fn _ -> assert HammerBackend.peek(:ignored, config) == :ok end)
+
+      assert Enum.map(1..3, fn _ -> HammerBackend.check(:ignored, config) end) ==
+               List.duplicate(:ok, 3)
+
+      assert {:wait, _} = HammerBackend.peek(:ignored, config)
+    end
+
+    test "reports a wait bounded by the window" do
+      window = :timer.seconds(5)
+
+      {:ok, config} =
+        HammerBackend.init(unique_service(), limit: 1, per: window, module: HammerLimiter)
+
+      assert HammerBackend.check(:ignored, config) == :ok
+
+      assert {:wait, retry_after} = HammerBackend.peek(:ignored, config)
+      # Derived from expires_at/2, so it should be a real remaining duration
+      # rather than the whole window or a wall-clock timestamp.
+      assert retry_after > 0 and retry_after <= window
+    end
+  end
+
   describe "through ExternalService" do
     test "a service can be rate limited by a Hammer module" do
       service = unique_service()

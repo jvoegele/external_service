@@ -34,10 +34,25 @@ defmodule ExternalService.CircuitBreaker do
   handed back to every other callback, so a backend needs no process, supervisor,
   or registry of its own.
 
-  This library never calls these functions on your behalf outside a guarded call.
-  The user-facing view of a breaker stays at the level of
-  `ExternalService.available?/1`, `ExternalService.blown?/1`, and
-  `ExternalService.reset/1` — the concept, not the individual operations.
+  ## Driving a breaker directly
+
+  Most of the time the breaker is driven for you: `ExternalService.call/3` asks
+  it before each attempt and melts it on failure. The functions in this module
+  are for the cases that fall outside a guarded call.
+
+  The one that matters is `melt/1` — recording a failure the library never saw:
+
+      # A streaming connection to the service dropped, or a webhook timed out.
+      # That is a real failure, but it did not happen inside `call/3`.
+      ExternalService.CircuitBreaker.melt(:payments)
+
+  Melting counts toward the service's configured `:tolerate` exactly as an
+  in-call failure does, so enough out-of-band failures will open the breaker —
+  and, with `ExternalService.CircuitBreaker.Cluster`, open it across the cluster.
+
+  `ask/1` and `reset/1` are also here, though `ExternalService.available?/1`,
+  `ExternalService.blown?/1`, and `ExternalService.reset/1` say the same thing
+  more readably and are usually the better call.
   """
 
   @type service :: ExternalService.service()
@@ -75,8 +90,56 @@ defmodule ExternalService.CircuitBreaker do
 
   @default_backend ExternalService.CircuitBreaker.Fuse
 
-  # The functions below dispatch to a backend on `ExternalService`'s behalf. They
-  # are not part of the public API: only the behaviour above is public.
+  @doc """
+  Reports whether `service`'s breaker will currently admit a call.
+
+  Answers `:not_started` for a service that has not been started with
+  `ExternalService.start/2`, which is why this is three-valued where
+  `ExternalService.available?/1` is a boolean.
+  """
+  @spec ask(service()) :: :ok | :blown | :not_started
+  def ask(service) do
+    with {:ok, breaker} <- fetch(service), do: ask(service, breaker)
+  end
+
+  @doc """
+  Records a single failure against `service`'s breaker.
+
+  Use this to report a failure that happened outside a guarded call, so that it
+  counts toward the breaker in the same way an in-call failure would. Enough
+  melts within the configured `:within` window will open the breaker.
+  """
+  @spec melt(service()) :: :ok | {:error, :not_found}
+  def melt(service) do
+    case fetch(service) do
+      {:ok, breaker} -> melt(service, breaker)
+      :not_started -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Closes `service`'s breaker and discards its recorded failures.
+
+  `ExternalService.reset/1` is the same operation under a friendlier name.
+  """
+  @spec reset(service()) :: :ok | {:error, :not_found}
+  def reset(service) do
+    case fetch(service) do
+      {:ok, breaker} -> reset(service, breaker)
+      :not_started -> {:error, :not_found}
+    end
+  end
+
+  defp fetch(service) do
+    case ExternalService.State.fetch(service) do
+      {:ok, %{circuit_breaker: breaker}} -> {:ok, breaker}
+      :error -> :not_started
+    end
+  end
+
+  # The functions below dispatch to a backend on `ExternalService`'s behalf, and
+  # take the installed breaker rather than resolving it from the service state.
+  # They are not part of the public API.
 
   @doc false
   @spec default_backend() :: module()

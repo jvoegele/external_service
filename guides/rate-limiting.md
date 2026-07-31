@@ -120,6 +120,50 @@ The alternative to a budget is to absorb the wait elsewhere: run the work throug
 `call_async_stream/2` so a pool of tasks does the sleeping, or apply your own
 back-pressure upstream.
 
+## Asking before you commit
+
+Sometimes you want to know whether a call would be throttled *before* doing the
+work that leads up to it. `rate_limited?/1` answers that, and consumes nothing —
+it is a read, so it is safe to ask as often as you like:
+
+```elixir
+if ExternalService.rate_limited?(:payments) do
+  {:error, :busy}
+else
+  charge(build_expensive_request(order))
+end
+```
+
+When you want to know *how long* the wait would be rather than merely whether
+there is one, `ExternalService.RateLimiter.peek/1` reports it:
+
+```elixir
+case ExternalService.RateLimiter.peek(:payments) do
+  :ok -> start_work()
+  {:wait, ms} -> {:error, {:busy, retry_after: ms}}
+end
+```
+
+Both are best-effort, in the same way `available?/1` is: another process can
+spend the budget between your check and your call. They let you bail out early;
+they do not replace handling the call's own result.
+
+## Counting calls made elsewhere
+
+If some of your traffic reaches the service by a path that does not go through
+`call/3` — a batch endpoint, a streaming client, a library you do not control —
+it still counts against the provider's quota even though this library never saw
+it. `request/1` spends budget without running anything:
+
+```elixir
+# This batch endpoint costs three calls against the quota.
+Enum.each(1..3, fn _ -> ExternalService.RateLimiter.request(:payments) end)
+```
+
+It blocks according to the service's `:wait` setting, exactly as a guarded call
+would, and returns `{:error, %ExternalService.RateLimited{}}` if that budget runs
+out.
+
 ## Pacing inside a Flow pipeline
 
 `ExternalService.Flow` (the optional `:flow` integration) paces the same way: a

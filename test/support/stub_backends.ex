@@ -23,6 +23,16 @@ defmodule ExternalService.Test.StubLimiter do
     end
   end
 
+  @impl true
+  def peek(_service, config) do
+    # Reports the same answer as `check/2` without spending a denial, so tests
+    # can tell a consuming check from a non-consuming peek.
+    case Process.get(@denials, 0) do
+      0 -> :ok
+      _remaining -> {:wait, Map.get(config, :wait, 1)}
+    end
+  end
+
   @doc "Makes the next `count` checks report `{:wait, _}`."
   def deny_next(count), do: Process.put(@denials, count)
 

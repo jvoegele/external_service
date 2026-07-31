@@ -61,6 +61,17 @@ defmodule ExternalService.RateLimiter.Local do
     admit(ref, interval, burst, now())
   end
 
+  @impl true
+  def peek(_service, %{ref: ref, interval: interval, burst: burst}) do
+    # The same arithmetic as `admit/4`, minus the compare-and-exchange that
+    # would move the bucket forward. Reading a single atomics slot is already
+    # atomic, so no retry loop is needed.
+    now = now()
+    admit_at = max(:atomics.get(ref, 1), now) + interval - burst
+
+    if admit_at > now, do: {:wait, to_milliseconds(admit_at - now)}, else: :ok
+  end
+
   defp admit(ref, interval, burst, now) do
     tat = :atomics.get(ref, 1)
     # A TAT in the past means the bucket has drained; the call is metered from

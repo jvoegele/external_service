@@ -64,6 +64,34 @@ defmodule ExternalService.RateLimiter.Hammer do
     end
   end
 
+  @impl true
+  def peek(_service, %{module: module, key: key, window: window, limit: limit} = config) do
+    # Hammer's `hit/3` both checks and consumes, so a non-consuming read has to
+    # be assembled from `get/2` (the current count) and, where the algorithm
+    # provides it, `expires_at/2`.
+    if module.get(key, window) < limit, do: :ok, else: {:wait, wait_time(config)}
+  end
+
+  defp wait_time(%{module: module, key: key, window: window} = config) do
+    # `expires_at/2` is only defined for algorithms with a discrete window
+    # (Hammer's fixed window), and answers an absolute wall-clock timestamp in
+    # milliseconds — the same clock Hammer meters on — or `0` for no active
+    # window.
+    if function_exported?(module, :expires_at, 2) do
+      case module.expires_at(key, window) do
+        0 -> estimated_wait(config)
+        expires_at -> max(1, expires_at - System.system_time(:millisecond))
+      end
+    else
+      estimated_wait(config)
+    end
+  end
+
+  # Without a real window expiry to read, one call's worth of the window is the
+  # best available guess.
+  defp estimated_wait(%{window: window, limit: limit}),
+    do: trunc(Float.ceil(window / limit))
+
   @doc "The Hammer key used for a service when no `:key` option is given."
   @spec default_key(ExternalService.service()) :: String.t()
   def default_key(service), do: "external_service/#{inspect(service)}"
