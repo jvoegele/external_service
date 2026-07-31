@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **`ExternalService.start/2` now warns when a service configures no retry
+  bound** ([issue #43](https://github.com/jvoegele/external_service/issues/43)).
+  Retry options that set neither `:max_attempts` nor `:expiry` retry forever, and
+  the circuit breaker does not reliably stop them: exponential backoff eventually
+  spaces attempts further apart than the breaker's `:within` window, so failures
+  stop accumulating fast enough to reach `:tolerate`. This is not a pathological
+  corner — a fully default breaker with `retry: [base: 100]` never opens, and the
+  call never returns. The library's own documentation has always advised against
+  this configuration; now the advice reaches the place the mistake is made.
+- **`:max_attempts` and `:expiry` accept `:infinity`.** It behaves exactly like
+  leaving the bound unset, but states the intent explicitly and silences the new
+  warning — for background work that really should retry until it succeeds, or
+  for a service whose call sites each supply their own bound.
+
+### Changed
+- **The `:max_attempts` documentation no longer describes the circuit breaker as
+  a bound on retries**, because it isn't one in the general case (see above).
+
+### Deprecated
+- Leaving both retry bounds unset is on the path to becoming an error. A future
+  3.0 is expected to give `:max_attempts` a finite default; `:infinity` is the
+  forward-compatible way to keep unbounded behavior.
+
 ## [2.3.0] - 2026-07-31
 
 ### Added

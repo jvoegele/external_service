@@ -17,6 +17,19 @@ defmodule ExternalService.RetryOptionsTest do
     test "raises on invalid options" do
       assert_raise NimbleOptions.ValidationError, fn -> RetryOptions.new(backoff: :nope) end
     end
+
+    test "accepts :infinity as an explicit statement that a bound is unbounded" do
+      assert %RetryOptions{max_attempts: :infinity} = RetryOptions.new(max_attempts: :infinity)
+      assert %RetryOptions{expiry: :infinity} = RetryOptions.new(expiry: :infinity)
+    end
+
+    test "rejects other atoms for the bounds" do
+      assert_raise NimbleOptions.ValidationError, fn ->
+        RetryOptions.new(max_attempts: :unlimited)
+      end
+
+      assert_raise NimbleOptions.ValidationError, fn -> RetryOptions.new(expiry: :forever) end
+    end
   end
 
   describe "merge/2" do
