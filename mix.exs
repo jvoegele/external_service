@@ -67,7 +67,10 @@ defmodule ExternalService.Mixfile do
   defp package do
     [
       name: :external_service,
-      files: ["lib", "mix.exs", "README.md", "LICENSE", "CHANGELOG.md"],
+      # `guides` is included because the README links into it: hex.pm renders the
+      # README out of this tarball, so without the guides those links 404 on the
+      # package page. (HexDocs is unaffected — ExDoc rewrites them at build time.)
+      files: ["lib", "guides", "mix.exs", "README.md", "LICENSE", "CHANGELOG.md"],
       maintainers: ["Jason Voegele"],
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url}
