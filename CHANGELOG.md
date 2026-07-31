@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-07-31
+
 ### Added
 - **A public control API for the circuit breaker and rate limiter**
   ([issue #26](https://github.com/jvoegele/external_service/issues/26)), for the
@@ -322,7 +324,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/2.2.0...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/2.3.0...HEAD
+[2.3.0]: https://github.com/jvoegele/external_service/compare/2.2.0...2.3.0
 [2.2.0]: https://github.com/jvoegele/external_service/compare/2.1.0...2.2.0
 [2.1.0]: https://github.com/jvoegele/external_service/compare/2.0.0...2.1.0
 [2.0.0]: https://github.com/jvoegele/external_service/compare/1.1.4...2.0.0

@@ -1,7 +1,7 @@
 defmodule ExternalService.Mixfile do
   use Mix.Project
 
-  @version "2.2.0"
+  @version "2.3.0"
   @source_url "https://github.com/jvoegele/external_service"
 
   def project do
