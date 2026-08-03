@@ -20,14 +20,18 @@ defmodule ExternalService.RetryOptions do
       doc: "Caps the delay between retries to at most this many milliseconds."
     ],
     expiry: [
-      type: :pos_integer,
-      doc: "Total time budget for retries, in milliseconds. Retrying stops once exceeded."
+      type: {:or, [:pos_integer, {:in, [:infinity]}]},
+      doc:
+        "Total time budget for retries, in milliseconds. Retrying stops once exceeded. " <>
+          "Defaults to no time budget; `:infinity` states that explicitly (see the note " <>
+          "on unbounded retries below)."
     ],
     max_attempts: [
-      type: :pos_integer,
+      type: {:or, [:pos_integer, {:in, [:infinity]}]},
       doc:
         "Maximum number of attempts (the initial attempt plus retries). " <>
-          "Defaults to no limit, bounded only by `:expiry` and/or the circuit breaker."
+          "Defaults to no limit; `:infinity` states that explicitly (see the note on " <>
+          "unbounded retries below)."
     ],
     jitter: [
       type: {:or, [:boolean, :float]},
@@ -63,6 +67,22 @@ defmodule ExternalService.RetryOptions do
   (which is validated and converted with `new/1`). The available options are:
 
   #{NimbleOptions.docs(@schema)}
+
+  ## Unbounded retries
+
+  Neither `:max_attempts` nor `:expiry` has a default, so options that set
+  neither place **no bound on retrying**: a call that keeps returning `:retry`
+  keeps retrying forever. The circuit breaker is not a reliable backstop for
+  this — exponential backoff widens the gap between attempts until failures no
+  longer accumulate fast enough to open it. Almost always, you want one of these
+  set. See [Bounding retries](retries.md#bounding-retries) for the details.
+
+  `ExternalService.start/2` logs a warning when a service's default retry
+  options leave both unset. If unbounded retrying really is what you want — or
+  every call site supplies its own bound — say so explicitly with `:infinity`,
+  which behaves identically but silences the warning:
+
+      ExternalService.start(:my_service, retry: [max_attempts: :infinity])
   """
 
   @validated_schema NimbleOptions.new!(@schema)
@@ -72,8 +92,8 @@ defmodule ExternalService.RetryOptions do
           base: non_neg_integer(),
           factor: pos_integer(),
           cap: pos_integer() | nil,
-          expiry: pos_integer() | nil,
-          max_attempts: pos_integer() | nil,
+          expiry: pos_integer() | :infinity | nil,
+          max_attempts: pos_integer() | :infinity | nil,
           jitter: boolean() | float(),
           retry_on: (term() -> as_boolean(term())) | nil,
           retry_exceptions: [module()]

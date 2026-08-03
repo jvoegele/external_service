@@ -157,9 +157,39 @@ retry: [max_attempts: 5, expiry: :timer.seconds(5), backoff: :exponential, base:
 > breaker opens after `:tolerate` failures *within* its `:within` window, but
 > exponential backoff keeps widening the gap between attempts. Once the delay
 > grows past the window, failures stop accumulating fast enough to trip the
-> breaker, and retries can continue far longer than you'd expect (in pathological
-> configs, effectively forever). Always set an explicit `:max_attempts` or
-> `:expiry` — and a `:cap`, below — for unattended retries.
+> breaker, and retrying continues indefinitely.
+>
+> This needs no exotic configuration. With a **fully default** circuit breaker
+> (`tolerate: 10`, `within: 10_000`) and retry options default except for the
+> `base: 100` used throughout this guide, attempts land at roughly 0ms, 100ms,
+> 300ms, 700ms, 1.5s, 3.1s, 6.3s, 12.7s, … Only seven of them ever fall inside
+> any 10-second window, so the melt count tops out at 7 against a `:tolerate` of
+> 10. The breaker never opens and the call never returns. Always set an explicit
+> `:max_attempts` or `:expiry` — and a `:cap`, below — for unattended retries.
+
+### Unbounded retries are a choice, not a default to fall into
+
+Because leaving both bounds unset is so rarely what you want,
+`ExternalService.start/2` logs a warning when a service's default retry options
+set neither:
+
+```
+[warning] ExternalService.start(:my_service, ...) sets no retry bound: neither
+:max_attempts nor :expiry is configured, so a call that keeps returning :retry
+will retry forever. ...
+```
+
+If unbounded retrying really is what you want — a background job that should keep
+trying until it succeeds, say — or if every call site supplies its own bound, set
+a bound to `:infinity` to say so. It behaves exactly like leaving the bound unset
+and silences the warning:
+
+```elixir
+ExternalService.start(:my_service, retry: [max_attempts: :infinity])
+```
+
+Even then, pair it with a `:cap` so the delay between attempts doesn't grow
+without limit.
 
 ## Capping the delay
 

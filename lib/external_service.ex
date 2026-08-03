@@ -256,9 +256,41 @@ defmodule ExternalService do
         Keyword.take(options, [:sleep_function])
       )
 
-    State.init(service, circuit_breaker, rate_limit, RetryOptions.new(options[:retry]))
+    retry_options = RetryOptions.new(options[:retry])
+    warn_unbounded_retries(service, retry_options)
+
+    State.init(service, circuit_breaker, rate_limit, retry_options)
     :ok
   end
+
+  # Retry options that set neither bound retry forever, and the circuit breaker
+  # does not reliably stop them: exponential backoff eventually spaces attempts
+  # further apart than the breaker's `:within` window, so failures stop
+  # accumulating fast enough to reach `:tolerate`. Warn where the configuration
+  # is written rather than leaving it to be discovered by a call that never
+  # returns. `:infinity` is the acknowledgement — it behaves the same but is
+  # deliberate, so it does not warn.
+  defp warn_unbounded_retries(service, %RetryOptions{max_attempts: nil, expiry: nil}) do
+    Logger.warning("""
+    ExternalService.start(#{inspect(service)}, ...) sets no retry bound: neither \
+    :max_attempts nor :expiry is configured, so a call that keeps returning :retry \
+    will retry forever. The circuit breaker is not a reliable backstop, because \
+    growing backoff delays can outpace its :within window.
+
+    Set a bound:
+
+        ExternalService.start(#{inspect(service)}, retry: [max_attempts: 5])
+
+    If unbounded retries are intended, or every call site passes its own bound, \
+    say so explicitly to silence this warning:
+
+        ExternalService.start(#{inspect(service)}, retry: [max_attempts: :infinity])
+
+    See https://hexdocs.pm/external_service/retries.html#bounding-retries\
+    """)
+  end
+
+  defp warn_unbounded_retries(_service, _retry_options), do: :ok
 
   @doc """
   Stops the fuse for a specific service.
@@ -584,7 +616,7 @@ defmodule ExternalService do
     delay_stream
     |> apply_jitter(retry_opts.jitter)
     |> apply_if(retry_opts.cap, &cap/2)
-    |> apply_if(retry_opts.expiry, &expiry/2)
+    |> apply_expiry(retry_opts.expiry)
     |> apply_max_attempts(retry_opts.max_attempts)
   end
 
@@ -600,9 +632,15 @@ defmodule ExternalService do
   defp apply_if(stream, nil, _fun), do: stream
   defp apply_if(stream, value, fun), do: fun.(stream, value)
 
+  # Both bounds distinguish `nil` (never set) from `:infinity` (explicitly
+  # unbounded) so that `start/2` can warn about the former, but the two behave
+  # identically here: neither limits the delay stream.
+  defp apply_expiry(stream, unbounded) when unbounded in [nil, :infinity], do: stream
+  defp apply_expiry(stream, expiry), do: Retry.DelayStreams.expiry(stream, expiry)
+
   # `max_attempts` counts the initial attempt plus retries, so the delay stream
   # (one delay per retry) is limited to `max_attempts - 1` elements.
-  defp apply_max_attempts(stream, nil), do: stream
+  defp apply_max_attempts(stream, unbounded) when unbounded in [nil, :infinity], do: stream
 
   defp apply_max_attempts(stream, max_attempts)
        when is_integer(max_attempts) and max_attempts > 0,

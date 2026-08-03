@@ -167,3 +167,17 @@ MyApp.Stripe.reset()
   `ExternalService.Flow`.
 - ~~Decorator-based annotations for marking external calls (#28)~~ — shipped in
   2.1.0 as `ExternalService.Decorator`.
+
+## Deferred to 3.0
+- **Give `:max_attempts` a finite default** (#43). Retry options that set neither
+  `:max_attempts` nor `:expiry` retry forever, and the circuit breaker is not a
+  reliable backstop — growing backoff delays outpace its `:within` window, so a
+  fully default breaker with `retry: [base: 100]` never opens. Changing the
+  default is the fix the documentation has always implied, but it silently
+  changes behavior for anyone relying on unbounded retries, so it belongs in a
+  major version.
+
+  The groundwork is in place as of the unreleased 2.x: `start/2` warns when both
+  bounds are unset, and `:infinity` is accepted as an explicit, forward-compatible
+  way to keep unbounded behavior. 3.0 changes the default and the warning goes
+  away.

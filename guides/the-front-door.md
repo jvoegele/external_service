@@ -134,7 +134,8 @@ example, when you start services dynamically or key them on runtime values:
 
 ```elixir
 ExternalService.start({:tenant, tenant_id},
-  circuit_breaker: [tolerate: 5, within: 1_000]
+  circuit_breaker: [tolerate: 5, within: 1_000],
+  retry: [max_attempts: 3]
 )
 
 ExternalService.call({:tenant, tenant_id}, fn -> fetch(tenant_id) end)
