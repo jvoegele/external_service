@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   3.0 is expected to give `:max_attempts` a finite default; `:infinity` is the
   forward-compatible way to keep unbounded behavior.
 
+### Fixed
+- **`guides/` is now included in the Hex package**
+  ([issue #42](https://github.com/jvoegele/external_service/issues/42)). The
+  README links into the guides eight times, and hex.pm renders the README out of
+  the package tarball — which did not contain them, so every one of those links
+  404'd on the package page. HexDocs was unaffected, since ExDoc reads the guides
+  from the working directory at doc-build time and rewrites the links.
+
 ## [2.3.0] - 2026-07-31
 
 ### Added
