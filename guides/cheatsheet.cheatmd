@@ -198,8 +198,8 @@ retry: [
   base: 100,               # initial delay ms (default 10)
   factor: 1,               # :linear growth factor
   cap: :timer.seconds(2),  # max single delay
-  max_attempts: 5,         # attempt count bound
-  expiry: :timer.seconds(10), # time budget ms
+  max_attempts: 5,         # attempt count bound (or :infinity)
+  expiry: :timer.seconds(10), # time budget ms (or :infinity)
   jitter: true,            # ±10%, or a float proportion
   retry_on: &match?({:error, _}, &1), # predicate over the result
   retry_exceptions: []     # exception modules to retry
@@ -221,7 +221,15 @@ retry: [retry_exceptions: [MyApp.TransientError]]
 
 # Retry on the result of an unmodified function
 retry: [retry_on: &match?({:error, %{status: 500}}, &1)]
+
+# Deliberately unbounded (silences the start/2 warning)
+retry: [max_attempts: :infinity, cap: 30_000]
 ```
+
+> #### Always set a bound {: .warning}
+>
+> Setting neither `:max_attempts` nor `:expiry` retries forever — the circuit
+> breaker does not reliably stop it. `start/2` warns when you do.
 
 ## Error handling
 {: .col-2}
