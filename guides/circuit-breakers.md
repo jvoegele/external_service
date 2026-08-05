@@ -192,6 +192,95 @@ Use it sparingly and only for genuine failures of the service. Melting on
 something that is not the service's fault will fail-fast traffic that would have
 succeeded.
 
+## When the service hangs
+
+The breaker protects you against a service that **fails**. It has no answer for
+one that **hangs**.
+
+If your function blocks, `call/3` blocks with it. No failure has been observed,
+so nothing melts the breaker, no retry is attempted, and no `:stop` telemetry is
+emitted. Measured with `tolerate: 1` while a slow call is in flight:
+
+```
+available?: true
+blown?:     false
+```
+
+That is correct behavior — the call hasn't failed, it just hasn't finished — but
+it is the opposite of what "circuit breaker" leads people to expect. The pattern
+as usually described pairs a breaker with a **timeout**, and the timeout is what
+converts a hang into the failure the breaker counts. Without one, the most common
+real degradation — service up, responses crawling — is invisible: latency climbs,
+processes pile up, and nothing trips.
+
+> #### `ExternalService` does not impose a timeout {: .warning}
+>
+> There is no `:timeout` option, and no retry option supplies one.
+> [`:expiry` is evaluated between attempts](retries.md#nothing-here-bounds-a-single-attempt),
+> so it cannot interrupt an attempt already running. **Bounding a single attempt
+> is your responsibility, at the client.**
+
+In practice this is where it belongs, because your HTTP client already has the
+timeout that matters — it can actually abandon the socket, which the library
+could not do from the outside:
+
+```elixir
+# Req
+Req.get(url, receive_timeout: :timer.seconds(5))
+
+# Finch
+Finch.request(req, MyFinch, receive_timeout: :timer.seconds(5), pool_timeout: :timer.seconds(1))
+
+# Tesla / Hackney
+Tesla.get(client, path, opts: [adapter: [recv_timeout: :timer.seconds(5)]])
+```
+
+Set the pool checkout timeout too, not just the receive timeout. Under saturation
+you block waiting for a connection before you ever send a request, and only the
+checkout timeout bounds that.
+
+Once the client times out, the wrapped function returns or raises — which *is* an
+observable failure, so it melts the breaker and can be retried like any other:
+
+```elixir
+def fetch(id) do
+  call fn ->
+    case Req.get(url(id), receive_timeout: :timer.seconds(5)) do
+      {:ok, %{status: status} = resp} when status < 500 -> {:ok, resp}
+      # Timeouts and 5xx are worth another attempt; both melt the breaker.
+      _ -> :retry
+    end
+  end
+end
+```
+
+Why the library doesn't do this for you: running each attempt in a `Task` would
+put a process on the hot path, which is the cost this library exists to avoid,
+and it would not help as much as it appears. Killing the task stops you *waiting*
+for the socket but does not cancel the request — the connection can stay checked
+out, so the timeout masks saturation rather than relieving it. It would also move
+your function off the calling process, so anything it reads from there — `Logger`
+metadata, OpenTelemetry context, Ecto sandbox ownership — would silently change.
+
+Note that a timeout bounds each call but does not bound how many are in flight at
+once. Limiting concurrency is
+[not something this library does either](#what-this-library-does-not-bound).
+
+## What this library does not bound
+
+Collected in one place, since each is easy to assume you're getting:
+
+| Not bounded | Where it belongs |
+| --- | --- |
+| How long one attempt may take | Your HTTP client's receive and pool-checkout timeouts (above). |
+| How many calls are in flight at once | A pool (`poolboy`, your HTTP client's own pool) or a `Task.Supervisor` with `max_children`. |
+
+The rate limiter bounds how *often* calls start, which is not the same as how
+many are running: at `limit: 100, per: 1_000` against a service that slows to 10
+seconds per call, roughly a thousand processes end up parked in the same call.
+Each holds a connection and whatever the caller had live. The breaker only opens
+once things actually start failing, by which point the pressure is upstream of it.
+
 ## Fault injection (for testing)
 
 The `:fault_injection` option makes the breaker fail a random fraction of calls,

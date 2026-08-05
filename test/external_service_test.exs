@@ -737,6 +737,50 @@ defmodule ExternalServiceTest do
       assert Process.get(:count) > 5
     end
 
+    test "expiry is evaluated between attempts, so it cannot bound a slow one" do
+      # Documented in guides/retries.md and guides/circuit-breakers.md: the
+      # library imposes no timeout, and :expiry does not supply one. If this ever
+      # starts bounding attempt duration, those sections are wrong.
+      name = start_fuse(:"expiry-slow-attempt", circuit_breaker: [tolerate: 100, within: 60_000])
+      Process.put(:count, 0)
+      opts = %RetryOptions{backoff: :linear, base: 0, max_attempts: 4, expiry: 100}
+
+      {elapsed, _result} =
+        :timer.tc(fn ->
+          ExternalService.call(name, opts, fn ->
+            Process.put(:count, Process.get(:count) + 1)
+            Process.sleep(300)
+            :retry
+          end)
+        end)
+
+      # At least one whole attempt ran to completion despite a 100ms budget, so
+      # the call overran it by several times.
+      assert Process.get(:count) >= 2
+      assert elapsed > 500_000
+    end
+
+    test "a call in flight does not melt the breaker" do
+      name = start_fuse(:"slow-call-no-melt", circuit_breaker: [tolerate: 1, within: 60_000])
+
+      task =
+        Task.async(fn ->
+          ExternalService.call(name, %RetryOptions{max_attempts: 1}, fn ->
+            Process.sleep(300)
+            :ok
+          end)
+        end)
+
+      Process.sleep(100)
+
+      # No failure has been observed yet, so there is nothing for the breaker to
+      # count -- which is exactly why a hang is invisible to it.
+      assert ExternalService.available?(name)
+      refute ExternalService.blown?(name)
+
+      assert Task.await(task) == :ok
+    end
+
     test "jitter affects only delay, not the attempt count" do
       for jitter <- [true, 0.5] do
         name = start_fuse(:"jitter-test-#{inspect(jitter)}")

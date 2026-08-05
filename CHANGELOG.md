@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+- **Documented that `ExternalService` imposes no timeout**
+  ([issue #44](https://github.com/jvoegele/external_service/issues/44)). The
+  breaker protects against a service that fails, not one that hangs: a blocking
+  function blocks `call/3`, melts nothing, and trips no breaker — measured with
+  `tolerate: 1`, a slow in-flight call leaves the service reporting
+  `available?: true`. A new **When the service hangs** section in the circuit
+  breaker guide says so plainly, shows where the timeout belongs (the client's
+  receive *and* pool-checkout timeouts), and explains why running attempts in a
+  `Task` would cost a process on the hot path without reliably cancelling
+  anything.
+- **Corrected what `:expiry` bounds.** It was documented as a time budget for
+  retries, which reads like a wall-clock bound on the call. It is evaluated
+  *between* attempts, so it bounds when the next attempt starts and never how
+  long the current one runs. Measured with `max_attempts: 4, expiry: 100` against
+  a function sleeping 300ms per attempt: 2 attempts, **706ms total** — seven times
+  the budget. A function that never returns is never bounded by it at all. Both
+  measurements are now pinned by tests.
+- **The circuit breaker guide names what the library does not bound** — attempt
+  duration and in-flight concurrency — and points at where each belongs. The rate
+  limiter bounds how *often* calls start, not how many are running.
+
 ## [2.5.0] - 2026-08-05
 
 ### Added
