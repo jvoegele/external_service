@@ -263,23 +263,27 @@ your function off the calling process, so anything it reads from there — `Logg
 metadata, OpenTelemetry context, Ecto sandbox ownership — would silently change.
 
 Note that a timeout bounds each call but does not bound how many are in flight at
-once. Limiting concurrency is
-[not something this library does either](#what-this-library-does-not-bound).
+once. For that, see [Concurrency Limiting](concurrency.md) — and note the two go
+together, since a concurrency limit whose calls never finish just fills up.
 
 ## What this library does not bound
 
-Collected in one place, since each is easy to assume you're getting:
+One thing, and it is the one above:
 
 | Not bounded | Where it belongs |
 | --- | --- |
-| How long one attempt may take | Your HTTP client's receive and pool-checkout timeouts (above). |
-| How many calls are in flight at once | A pool (`poolboy`, your HTTP client's own pool) or a `Task.Supervisor` with `max_children`. |
+| How long one attempt may take | Your HTTP client's receive and pool-checkout timeouts. |
 
-The rate limiter bounds how *often* calls start, which is not the same as how
-many are running: at `limit: 100, per: 1_000` against a service that slows to 10
-seconds per call, roughly a thousand processes end up parked in the same call.
-Each holds a connection and whatever the caller had live. The breaker only opens
-once things actually start failing, by which point the pressure is upstream of it.
+Everything else has a bound available: failures with `:tolerate`, attempts with
+`:max_attempts`/`:expiry`, call *rate* with `:rate_limit`, and calls *in flight*
+with `:concurrency`.
+
+The last two are easy to confuse. The rate limiter bounds how *often* calls
+start, which is not the same as how many are running: at `limit: 100, per: 1_000`
+against a service that slows to 10 seconds per call, roughly a thousand processes
+end up parked in the same call, each holding a connection. That is what a
+[concurrency limit](concurrency.md) caps, and the breaker only opens once things
+actually start failing — by which point the pressure is upstream of it.
 
 ## Fault injection (for testing)
 

@@ -22,6 +22,7 @@ infrastructure errors. The same struct is _returned_ by `call/3` (inside an
 | `ExternalService.CircuitBreakerOpen` | a call was rejected because the breaker is open           | `503`           |
 | `ExternalService.ServiceNotStarted`  | a call was made to a service never started with `start/2` | `500`           |
 | `ExternalService.RateLimited`        | a call was throttled beyond the rate limit `:wait` budget | `429`           |
+| `ExternalService.ServiceSaturated`   | a call was shed because the concurrency limit was full    | `503`           |
 
 Each carries a `:context` map that always includes the `:service` it relates to.
 `RetriesExhausted` additionally carries `:context.reason` — the value from the
@@ -38,7 +39,17 @@ Because they are Errata infrastructure errors, they also come with an
 `http_status/1` and JSON encoding for free — convenient for turning a failure
 into an HTTP response or a structured log entry. `ServiceNotStarted` maps to
 `500` (it signals a configuration/programming mistake, not a transient outage)
-and `RateLimited` to `429`; the other two map to `503`.
+and `RateLimited` to `429`; the rest map to `503`.
+
+`RateLimited` and `ServiceSaturated` are worth telling apart. A rate limit is the
+*external service* refusing you, so `429` ("Too Many Requests") passes that on.
+Saturation is *your own* bulkhead shedding load before the call is made, which is
+a `503` from your application rather than a complaint from theirs.
+
+`ServiceSaturated` only appears for services configured with a `:concurrency`
+limit; see the [Concurrency Limiting](concurrency.md) guide. Like `RateLimited`
+it means the wrapped function never ran, so neither melts the circuit breaker and
+neither is retried.
 
 `RateLimited` only appears for services that bound the wait with `wait: false` or
 a millisecond budget — with `wait: :infinity`, or with `:wait` left unset, a

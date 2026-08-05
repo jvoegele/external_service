@@ -60,6 +60,34 @@ defmodule ExternalService.RateLimited do
   def http_status(_error), do: 429
 end
 
+defmodule ExternalService.ServiceSaturated do
+  @moduledoc """
+  Raised or returned when a call could not be made because the service's
+  concurrency limit was already fully in use.
+
+  This is an [Errata](https://hexdocs.pm/errata) infrastructure error. The same
+  value is returned in an `{:error, error}` tuple by `ExternalService.call/3` and
+  raised by `ExternalService.call!/3`.
+
+  Its `:context` contains:
+
+    * `:service` — the service the call was made against.
+    * `:limit` — the configured concurrency limit.
+    * `:in_flight` — how many slots were held when the call was rejected.
+
+  Only services configured with a `:concurrency` limit can produce this error.
+  Its `http_status/1` is the default `503`: unlike `ExternalService.RateLimited`,
+  this is not the external service refusing you, it is your own bulkhead shedding
+  load — a "Service Unavailable" from your application.
+
+  Because the wrapped function never ran, this does *not* melt the circuit
+  breaker and is not retried. Retrying immediately would only find the bulkhead
+  full again; shedding is the point. See `ExternalService.Concurrency`.
+  """
+  use Errata.InfrastructureError,
+    default_message: "the service's concurrency limit is fully in use"
+end
+
 defmodule ExternalService.ServiceNotStarted do
   @moduledoc """
   Raised or returned when a call is made to a service that has not been started
