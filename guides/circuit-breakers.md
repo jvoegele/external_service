@@ -39,7 +39,7 @@ use ExternalService,
 
 | Option             | Default  | Meaning                                                                                        |
 | ------------------ | -------- | ---------------------------------------------------------------------------------------------- |
-| `:tolerate`        | `10`     | Number of failed **attempts** tolerated within the `:within` window before the breaker opens.  |
+| `:tolerate`        | `10`     | Number of failed **attempts** tolerated within the `:within` window before the breaker opens. `:infinity` never opens. |
 | `:within`          | `10_000` | Length of the failure-counting window, in milliseconds.                                        |
 | `:reset`           | `60_000` | Milliseconds to wait before the breaker resets (closes) after opening.                         |
 | `:fault_injection` | —        | If set to a rate between `0.0` and `1.0`, randomly fails that fraction of calls (for testing). |
@@ -158,6 +158,19 @@ A few semantics worth knowing:
 failures. It is mainly useful in tests and in operational tooling ("we fixed the
 upstream, stop failing fast now").
 
+It resets **only** the breaker. A service's rate limiter is separate state, and
+clearing it releases a burst at the service — rarely what someone closing a
+breaker intended. When you do want both, `ExternalService.reset_all/1` clears the
+breaker and the limiter together:
+
+```elixir
+ExternalService.reset_all(:payments)
+MyApp.Stripe.reset_all()
+```
+
+That is usually what a test `setup` block wants; see the [Testing](testing.md)
+guide.
+
 ## Reporting a failure the library never saw
 
 The breaker counts failures that happen inside `call/3`. Sometimes a service
@@ -190,6 +203,39 @@ use ExternalService,
 ```
 
 This is a testing aid — leave it unset in production.
+
+## A breaker that never opens
+
+`tolerate: :infinity` installs **no breaker at all**. Calls are never rejected,
+melts are ignored, and the service holds no breaker state:
+
+```elixir
+use ExternalService,
+  circuit_breaker: [tolerate: :infinity]
+```
+
+Two situations want this.
+
+**In production**, for a service where opening the breaker is worse than the
+failures it would prevent — an idempotent write to a queue you'd rather keep
+retrying, say — while you still want the retry and telemetry machinery. It says
+that deliberately, where `tolerate: 1_000_000` only says "not for a while".
+
+**In tests**, because a breaker that holds no state cannot leak between them.
+`:tolerate` is normally the awkward one: it is global to the service and nothing
+resets it between tests, so a suite long enough to accumulate `:tolerate` melts
+starts failing tests that have nothing to do with the breaker. A finite number
+merely postpones that. See the [Testing](testing.md) guide.
+
+`:infinity` cannot be combined with `:fault_injection` — one promises the breaker
+never opens and the other exists to open it — so `start/2` raises rather than
+letting either silently win:
+
+```
+** (ArgumentError) ExternalService.start(:payments, ...) sets both
+circuit_breaker: [tolerate: :infinity] and :fault_injection, which contradict
+each other.
+```
 
 ## Choosing thresholds
 

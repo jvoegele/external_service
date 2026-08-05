@@ -100,13 +100,15 @@ defmodule ExternalService do
 
   @circuit_breaker_schema [
     tolerate: [
-      type: :pos_integer,
+      type: {:or, [:pos_integer, {:in, [:infinity]}]},
       default: 10,
       doc:
         "Number of failed **attempts** tolerated within the `:within` window before the " <>
           "breaker opens. Every failing retry attempt melts the breaker, so a single " <>
           "`call/3` with `max_attempts: 5` contributes up to 5 of them — `:tolerate` and " <>
-          "`:max_attempts` cannot be tuned independently."
+          "`:max_attempts` cannot be tuned independently. `:infinity` installs no breaker " <>
+          "at all: it never opens, holds no state, and cannot be combined with " <>
+          "`:fault_injection`."
     ],
     within: [
       type: :pos_integer,
@@ -135,9 +137,14 @@ defmodule ExternalService do
 
   @rate_limit_schema [
     limit: [
-      type: :pos_integer,
+      type: {:or, [:pos_integer, {:in, [:infinity]}]},
       required: true,
-      doc: "Maximum number of calls allowed within each `:per` window."
+      doc:
+        "Maximum number of calls allowed within each `:per` window. `:infinity` installs " <>
+          "no limiter at all — calls pass straight through, exactly as if `:rate_limit` " <>
+          "had been omitted. It is meant for overriding a configured limit (a child spec " <>
+          "override cannot remove a key); to have no rate limiting in the first place, " <>
+          "omit `:rate_limit`. `:per` is still required, and ignored."
     ],
     per: [
       type: :pos_integer,
@@ -251,6 +258,7 @@ defmodule ExternalService do
   @spec start(service(), options()) :: :ok
   def start(service, options \\ []) do
     options = NimbleOptions.validate!(options, @start_schema)
+    validate_breaker_combination!(service, options[:circuit_breaker])
 
     circuit_breaker = CircuitBreaker.install(service, options[:circuit_breaker])
 
@@ -267,6 +275,33 @@ defmodule ExternalService do
     warn_unbounded_retries(service, retry_options)
 
     State.init(service, circuit_breaker, rate_limit, retry_options)
+    :ok
+  end
+
+  # `:fault_injection` exists to make a breaker report blown; `tolerate: :infinity`
+  # promises it never will. Silently letting either win would make the other
+  # option a lie, so the combination is rejected where it is written.
+  defp validate_breaker_combination!(service, circuit_breaker_options) do
+    tolerate = circuit_breaker_options[:tolerate]
+    fault_injection = circuit_breaker_options[:fault_injection]
+
+    if tolerate == :infinity and not is_nil(fault_injection) do
+      raise ArgumentError, """
+      ExternalService.start(#{inspect(service)}, ...) sets both \
+      circuit_breaker: [tolerate: :infinity] and :fault_injection, which contradict \
+      each other. :tolerate: :infinity installs no breaker, so there is nothing for \
+      :fault_injection to blow.
+
+      Drop whichever you did not mean:
+
+          # a breaker that never opens
+          circuit_breaker: [tolerate: :infinity]
+
+          # a breaker that fails #{inspect(fault_injection)} of calls, for testing dependents
+          circuit_breaker: [fault_injection: #{inspect(fault_injection)}]
+      """
+    end
+
     :ok
   end
 
@@ -366,6 +401,38 @@ defmodule ExternalService do
   """
   @spec reset(service()) :: :ok | {:error, :not_found}
   def reset(service), do: CircuitBreaker.reset(service)
+
+  @doc """
+  Resets every stateful mechanism for the given service: the circuit breaker and
+  the rate limiter.
+
+  `reset/1` closes the breaker only, and deliberately leaves the rate limiter
+  alone — clearing a limiter in production releases a burst at the service, which
+  is rarely what someone closing a breaker meant to do. This function is for when
+  you do want a clean slate.
+
+  Its main use is between tests. A service's state is global — it lives in
+  `:persistent_term` and `:fuse`, keyed on the service term — so a test that
+  trips the breaker or drains the rate limit budget leaves it that way for
+  whatever runs next:
+
+      setup do
+        ExternalService.reset_all(MyApp.Stripe)
+        :ok
+      end
+
+  A service with no rate limit configured resets just the breaker. One that was
+  never started answers `{:error, :not_found}`, exactly as `reset/1` does.
+
+  Note that this shares state rather than isolating it, so it does not make
+  concurrent tests independent — see the [Testing](testing.md) guide.
+  """
+  @spec reset_all(service()) :: :ok | {:error, :not_found}
+  def reset_all(service) do
+    with :ok <- CircuitBreaker.reset(service) do
+      RateLimiter.reset(service)
+    end
+  end
 
   @doc """
   Returns `true` if the service is currently available, meaning its circuit
@@ -857,7 +924,7 @@ defmodule ExternalService do
     * `call/1`, `call/2`, `call!/1`, `call!/2`
     * `call_async/1`, `call_async/2`
     * `call_async_stream/2`, `call_async_stream/3`, `call_async_stream/4`
-    * `available?/0`, `blown?/0`, `reset/0`
+    * `available?/0`, `blown?/0`, `reset/0`, `reset_all/0`
     * `child_spec/1`, `start_link/1`
   """
   defmacro __using__(opts) do
@@ -939,6 +1006,9 @@ defmodule ExternalService do
 
       @doc "Resets the circuit breaker. See `ExternalService.reset/1`."
       def reset, do: ExternalService.reset(@__external_service__)
+
+      @doc "Resets the circuit breaker and the rate limiter. See `ExternalService.reset_all/1`."
+      def reset_all, do: ExternalService.reset_all(@__external_service__)
     end
   end
 end

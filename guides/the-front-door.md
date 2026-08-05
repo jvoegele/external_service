@@ -88,6 +88,7 @@ above keeps the `:within` and `:reset` from the module and only changes
 | `available?/0`                 | `ExternalService.available?/1`            | Is the breaker closed?              |
 | `blown?/0`                     | `ExternalService.blown?/1`                | Is the breaker open?                |
 | `reset/0`                      | `ExternalService.reset/1`                 | Force the breaker closed.           |
+| `reset_all/0`                  | `ExternalService.reset_all/1`             | Clear the breaker and the limiter.  |
 | `child_spec/1`, `start_link/1` | —                                         | Supervision integration.            |
 
 The one- and two-argument `call` forms differ only in whether you pass retry

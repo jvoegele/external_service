@@ -69,15 +69,38 @@ refute ExternalService.blown?(two)
 > in `setup` works too, but only for the breaker, and only if nothing else is
 > running concurrently.
 
-Where per-test services are impractical, resetting in `setup` gets you most of
-the way:
+Where per-test services are impractical — which is most of the time with a
+front-door module — reset the shared service instead. `ExternalService.reset_all/1`
+clears both stateful mechanisms, so nothing a test does to the breaker or the
+rate limit budget survives into the next one:
 
 ```elixir
 setup do
-  ExternalService.reset(MyApp.Stripe)
+  MyApp.Stripe.reset_all()
   :ok
 end
 ```
+
+Use `reset_all/1` rather than `reset/1` here. `reset/1` closes the breaker and
+deliberately leaves the limiter alone, because clearing a limiter in production
+releases a burst at the service — so a test that drained the budget would leave
+the next one throttled.
+
+Resetting **shares** state rather than isolating it, so it does not make
+concurrent tests independent: two `async: true` tests can still interleave a
+reset with the other's assertions. Which leads to the tiering below.
+
+### Which technique for which test
+
+| Your test | Approach |
+| --- | --- |
+| Business logic that happens to call through | Make the service **inert** (below). No isolation needed — there is no state to share. |
+| Resilience behavior: fallbacks, breaker opening, throttled paths | Real mechanisms + `reset_all/1` in `setup`, and `async: false`. |
+| A service you drive with the functional API | A unique service term per test. Fully isolated, works with `async: true`. |
+
+The middle row is the only one that gives up `async: true`, and it is normally
+the smallest group — those tests are in-memory and fast, so serializing them
+costs little.
 
 ## Keeping tests off the clock
 
@@ -234,30 +257,64 @@ breaks under `async: true`. The other events are listed in the
 and `[:external_service, :rate_limit, :sleep]` are the other two worth asserting
 on.
 
-## Per-environment configuration
+## Making a service inert
+
+Everything above makes a service *fast*. Sometimes you want it *absent*: the
+guarded call should run your function and otherwise stay out of the way, because
+what you're testing is the code around it.
 
 Child-spec overrides are deep merged with the options given to
-`use ExternalService`, which is the idiomatic way to make a service fast in
-`test.exs` without a second module:
+`use ExternalService`, so `test.exs` can neutralize a service without a second
+module:
 
 ```elixir
 children = [
   {MyApp.Stripe,
-   circuit_breaker: [tolerate: 1],
-   retry: [max_attempts: 1],
-   rate_limit: [wait: false]}
+   circuit_breaker: [tolerate: :infinity],
+   rate_limit: [limit: :infinity],
+   retry: [max_attempts: 1]}
 ]
 ```
 
+Each key turns off exactly one mechanism, and each is exact rather than merely
+large:
+
+| Key | Effect |
+| --- | --- |
+| `circuit_breaker: [tolerate: :infinity]` | Installs no breaker. Never opens, holds no state. |
+| `rate_limit: [limit: :infinity]` | Installs no limiter. Calls pass straight through. |
+| `retry: [max_attempts: 1]` | One attempt; a `:retry` return becomes `RetriesExhausted`. |
+
+`:infinity` matters more than it looks. The breaker and the limiter are the two
+**stateful** mechanisms — the ones that accumulate across tests — and until they
+had an off switch you could only set them very large. Large is finite: a suite
+long enough to accumulate `:tolerate` melts starts failing tests that have
+nothing to do with the breaker, and the failure looks like flakiness. `:infinity`
+removes the state rather than postponing it, which also means it no longer
+matters that a front-door module can't vary its `:name` per test — inert
+mechanisms have nothing to share.
+
 Because the merge is deep, you override only the keys you name; `:within`,
-`:reset`, `:limit`, and `:per` all fall back to the module-level configuration.
-See [Per-environment overrides](the-front-door.md#per-environment-overrides).
+`:reset`, and `:per` all fall back to the module-level configuration. See
+[Per-environment overrides](the-front-door.md#per-environment-overrides).
+
+Swap in `retry: [max_attempts: 3, base: 0]` when you *do* want the retry logic
+exercised — `base: 0` keeps it instant. And note that `rate_limit: [wait: false]`
+is a different thing from `limit: :infinity`: it makes throttled calls fail fast,
+which is interference, just quick interference. Use it when you're testing the
+throttled path, not when you want the limiter gone.
 
 ## What this library does not give you
 
-There is no first-class test mode — no documented way to make a service a
-pass-through no-op. The closest thing is `retry: [max_attempts: 1]` with a
-generous `:tolerate` and `rate_limit: [wait: false]`, which is a workaround
-rather than an answer. If you want a guarded call to be transparent in tests,
-stub at your own boundary — the function you pass to `call/3` — rather than
-trying to neutralize the service.
+There is no single `mode: :passthrough` switch — the three keys above are the
+whole of it, deliberately, because each also means something on its own in
+production. There is also no way to make a guarded call *transparent*: with
+`max_attempts: 1`, a function returning `:retry` yields `RetriesExhausted` rather
+than the raw `:retry`, because the sentinel belongs to the library.
+
+The broader point: an inert service is not a tested one. Tests that run with the
+mechanisms off are not exercising your `:retry` returns, your fallback paths, or
+your error handling — so keep some that do, using the techniques above. If what
+you want is for the external call not to happen at all, stub at your own
+boundary, in the function you pass to `call/3`, rather than neutralizing the
+service around it.

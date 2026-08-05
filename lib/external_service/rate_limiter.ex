@@ -123,6 +123,15 @@ defmodule ExternalService.RateLimiter do
   """
   @callback peek(service(), config()) :: :ok | {:wait, non_neg_integer()}
 
+  @doc """
+  Discards the limiter's recorded usage, returning it to a full budget.
+
+  The counterpart to `c:ExternalService.CircuitBreaker.reset/2`. Mostly useful
+  between tests, where a bucket drained by one test would otherwise throttle the
+  next, but also for clearing a limiter after an operational intervention.
+  """
+  @callback reset(service(), config()) :: :ok
+
   @default_backend ExternalService.RateLimiter.Local
 
   @typedoc """
@@ -160,6 +169,27 @@ defmodule ExternalService.RateLimiter do
       {:ok, %__MODULE__{backend: module, config: config}} -> module.peek(service, config)
       # Not rate limited, or not started: nothing is making this call wait.
       _ -> :ok
+    end
+  end
+
+  @doc """
+  Discards `service`'s recorded rate limit usage, returning it to a full budget.
+
+  Symmetric with `ExternalService.CircuitBreaker.reset/1`. A service with no rate
+  limit configured answers `:ok`, since there is nothing to reset; one that was
+  never started answers `{:error, :not_found}`.
+
+  Chiefly useful between tests — a bucket drained by one test throttles the next,
+  and nothing clears it automatically. `ExternalService.reset_all/1` resets the
+  breaker and the limiter together, which is usually what a `setup` block wants.
+  """
+  @spec reset(service()) :: :ok | {:error, :not_found}
+  def reset(service) do
+    case fetch(service) do
+      {:ok, %__MODULE__{backend: module, config: config}} -> module.reset(service, config)
+      # Configured without a rate limit: no usage has been recorded to discard.
+      {:ok, nil} -> :ok
+      :not_started -> {:error, :not_found}
     end
   end
 
@@ -212,6 +242,17 @@ defmodule ExternalService.RateLimiter do
   def new(_service, nil, _opts), do: nil
 
   def new(service, options, opts) when is_list(options) do
+    if Keyword.fetch!(options, :limit) == :infinity do
+      # Indistinguishable from having no `:rate_limit` at all, which is exactly
+      # the point: a child spec override can replace a key but cannot remove one,
+      # so `limit: :infinity` is how an inherited limit is switched off.
+      nil
+    else
+      build(service, options, opts)
+    end
+  end
+
+  defp build(service, options, opts) do
     # `:wait` governs the runtime rather than the backend, so it is taken out
     # before the remaining options are handed over. It has no schema default, so
     # an absent key arrives here as `nil` — "never set", which waits like

@@ -126,6 +126,11 @@ defmodule ExternalService.CircuitBreaker.Cluster do
   # around the cluster.
   def remote_trip(service) do
     case local_config(service) do
+      # A breaker configured `tolerate: :infinity` has no fuse to melt and is
+      # never meant to open, so a peer's trip does not apply to it.
+      {:ok, %{tolerate: :infinity}} ->
+        :ok
+
       {:ok, config} ->
         Enum.each(0..config.tolerate, fn _ -> :fuse.melt(service) end)
 

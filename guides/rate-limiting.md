@@ -23,12 +23,27 @@ use ExternalService,
 
 | Option     | Required | Meaning                                                                  |
 | ---------- | -------- | ------------------------------------------------------------------------ |
-| `:limit`   | yes      | Maximum number of calls allowed within each `:per` window.               |
+| `:limit`   | yes      | Maximum number of calls allowed within each `:per` window. `:infinity` never throttles. |
 | `:per`     | yes      | Length of the rate-limiting window, in milliseconds.                     |
 | `:wait`    | no       | How long a throttled call may wait. Unset waits indefinitely, and warns. |
 | `:backend` | no       | The limiter implementation. Defaults to `ExternalService.RateLimiter.Local`. |
 
 `:limit` and `:per` are both required when `:rate_limit` is present.
+
+### Turning a limit off
+
+`limit: :infinity` installs no limiter — calls pass straight through, exactly as
+if `:rate_limit` had been omitted:
+
+```elixir
+# in test.exs, overriding a module that configures a real limit
+{MyApp.Api, rate_limit: [limit: :infinity]}
+```
+
+If you want no rate limiting in the first place, just omit `:rate_limit`.
+`:infinity` is for the case where you cannot: child spec overrides are deep
+merged, so they can *replace* a key but never *remove* one. `:per` stays
+required and is ignored.
 
 ## How it works
 
