@@ -48,6 +48,7 @@ defmodule MyApp.Api do
     rate_limit: [
       limit: 100,
       per: :timer.seconds(1),
+      wait: :timer.seconds(1),
       backend: {ExternalService.RateLimiter.Hammer, module: MyApp.RateLimit}
     ]
 end

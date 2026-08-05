@@ -21,15 +21,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   leaving the bound unset, but states the intent explicitly and silences the new
   warning — for background work that really should retry until it succeeds, or
   for a service whose call sites each supply their own bound.
+- **`ExternalService.start/2` now warns when a rate limited service sets no
+  `:wait` budget** ([issue #47](https://github.com/jvoegele/external_service/issues/47)).
+  A throttled call sleeps the calling process until the limiter admits it, which
+  is correct for background work and wrong in a request path, where it converts
+  load into latency and process growth instead of a fast 429. The warning fires
+  only for services that configure `:rate_limit`. `wait: :infinity` states the
+  unbounded intent explicitly and silences it.
 
 ### Changed
 - **The `:max_attempts` documentation no longer describes the circuit breaker as
   a bound on retries**, because it isn't one in the general case (see above).
+- **`:wait` no longer carries a documented default of `:infinity`.** Runtime
+  behavior is unchanged — an unset `:wait` still waits as long as the limiter
+  requires — but it is now distinguishable from an explicit `:infinity`, which
+  is what lets `start/2` warn about the former only.
 
 ### Deprecated
 - Leaving both retry bounds unset is on the path to becoming an error. A future
   3.0 is expected to give `:max_attempts` a finite default; `:infinity` is the
   forward-compatible way to keep unbounded behavior.
+- Leaving `:wait` unset is likewise on the path to changing meaning. 3.0 is
+  expected to default it to a finite, `:per`-derived budget; `wait: :infinity`
+  is the forward-compatible way to keep waiting indefinitely.
 
 ### Fixed
 - **`guides/` is now included in the Hex package**

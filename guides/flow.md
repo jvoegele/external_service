@@ -129,7 +129,19 @@ The rate-limit bucket is global per service, so the configured limit is honored
 across all of Flow's parallel stages. Throttling works by sleeping the stage
 process, which naturally back-pressures the pipeline upstream. Because a sleeping
 call stalls the rest of its demand batch, a smaller `:max_demand` gives smoother
-pacing under a rate limit. See the [Rate limiting](rate-limiting.md) guide.
+pacing under a rate limit.
+
+A pipeline is the case where an unbounded wait is the right answer: sleeping is
+how the back-pressure reaches upstream, so a wait budget would shed work rather
+than pace it. Say so explicitly with `wait: :infinity`, which is also what
+silences the startup warning about an unset `:wait`:
+
+```elixir
+use ExternalService,
+  rate_limit: [limit: 100, per: :timer.seconds(1), wait: :infinity]
+```
+
+See the [Rate limiting](rate-limiting.md) guide.
 
 ### Passing Flow options
 

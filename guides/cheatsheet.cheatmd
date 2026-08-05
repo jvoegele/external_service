@@ -12,7 +12,7 @@ detail.
 defmodule MyApp.Api do
   use ExternalService,
     circuit_breaker: [tolerate: 5, within: :timer.seconds(1), reset: :timer.seconds(5)],
-    rate_limit: [limit: 100, per: :timer.seconds(1)],
+    rate_limit: [limit: 100, per: :timer.seconds(1), wait: :timer.seconds(1)],
     retry: [max_attempts: 5, backoff: :exponential, jitter: true]
 
   def fetch(id), do: call(fn -> HTTP.get("/things/#{id}") end)
@@ -142,8 +142,8 @@ ExternalService.CircuitBreaker.ask(:api)
 rate_limit: [
   limit: 100,               # calls per window
   per: :timer.seconds(1),   # window ms
-  wait: :infinity           # :infinity | ms | false
-]
+  wait: :timer.seconds(1)   # :infinity | ms | false
+]                           # unset waits forever, and warns
 ```
 
 Burst up to `limit`, then paced at `per / limit`.

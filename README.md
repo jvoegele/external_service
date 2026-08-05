@@ -44,7 +44,7 @@ under your supervisor:
 defmodule MyApp.Stripe do
   use ExternalService,
     circuit_breaker: [tolerate: 5, within: :timer.seconds(1), reset: :timer.seconds(5)],
-    rate_limit: [limit: 100, per: :timer.seconds(1)],
+    rate_limit: [limit: 100, per: :timer.seconds(1), wait: :timer.seconds(1)],
     retry: [max_attempts: 5, backoff: :exponential, jitter: true]
 
   def charge(params) do

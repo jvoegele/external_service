@@ -169,6 +169,39 @@ MyApp.Stripe.reset()
   2.1.0 as `ExternalService.Decorator`.
 
 ## Deferred to 3.0
+
+Both items below are the same shape: flip a default that currently never gives
+up. Both were reconsidered for the 2.x line while their warnings were still
+unreleased — nothing had been promised yet, so folding them in early was on the
+table — and both stayed here deliberately.
+
+**Why they are not 2.x changes.** What makes them major is not that a warning
+announced them; it is that they are invisible at the call site. The same code
+compiles identically and then behaves differently: a call that used to block
+until it succeeded now returns `RetriesExhausted` or `RateLimited` into a `case`
+that may have no clause for it. There is nothing to deprecate at the call site,
+because the call site isn't wrong — the configuration is. Shipping the flip in a
+minor, under `~> 2.0`, would hand that to anyone running `mix deps.update` with
+no signal at all. For a library whose pitch is *predictable failure behavior*,
+silently changing when calls give up is the worst-fitting surprise available.
+
+`:wait` sharpens the point: `guides/flow.md` recommends an unbounded wait for
+pipelines, because sleeping is how back-pressure propagates upstream. A finite
+default in a minor would silently convert that documented, correct setup into one
+that sheds work mid-pipeline.
+
+**The 2.x warnings are not merely deprecation machinery.** Each stands on its own
+as a footgun alarm — *this service will retry forever / wait forever, you probably
+didn't mean that, here is the one-line fix* — and is worth shipping even if the
+defaults never change. #43 proposed the warning on exactly those merits before the
+default change was on the table.
+
+The cost of that choice is a nag: until 3.0 ships, every unbounded service logs a
+warning at boot. The answer to that is to ship 3.0 promptly once the warnings have
+soaked, not to skip the warnings. 3.0's whole content is these two flips plus a
+one-page migration guide, so it needs soak time, not feature time — and it should
+not become a bucket that unrelated breaking changes accumulate in.
+
 - **Give `:max_attempts` a finite default** (#43). Retry options that set neither
   `:max_attempts` nor `:expiry` retry forever, and the circuit breaker is not a
   reliable backstop — growing backoff delays outpace its `:within` window, so a
@@ -181,3 +214,29 @@ MyApp.Stripe.reset()
   bounds are unset, and `:infinity` is accepted as an explicit, forward-compatible
   way to keep unbounded behavior. 3.0 changes the default and the warning goes
   away.
+
+- **Give the rate limit `:wait` a finite default** (#47). An unset `:wait` sleeps
+  the calling process until the limiter admits it. That is right for background
+  work and wrong in a request path, where it turns load into latency and process
+  growth instead of a fast 429 — and `ExternalService.RateLimited` already carries
+  `retry_after` and maps to 429, but the default configuration can never produce
+  it.
+
+  The wait is also not as predictable as it looks. A single backend check never
+  reports more than one emission interval (`:per / :limit`), so long waits come
+  from the re-check loop, which has no queue and is unfair: measured at
+  `limit: 50, per: 1_000`, one caller against a herd of 25 blocked for 1.7s, 4.4s
+  and 5.2s across three runs of the same scenario.
+
+  **The 3.0 default should be a finite budget derived from `:per`, not `false`.**
+  Measured at `limit: 50, per: 1_000`, a one-window (1000ms) budget sheds 0% at
+  1× offered load, 1% of a 2× instantaneous burst, 9% of a 2× sustained load and
+  50% under 6× sustained — it absorbs bursts and sheds only real overload.
+  `wait: false` sheds 50% of that same 2× burst, which would make bursty-but-
+  healthy traffic look like an outage. One window is the value to beat; the exact
+  multiple is worth re-measuring against the Hammer backend before committing.
+
+  Groundwork is in place as of the unreleased 2.x: `:wait` has no schema default,
+  so an unset value is distinguishable from an explicit `:infinity`; `start/2`
+  warns about the former, and `:infinity` is the forward-compatible way to keep
+  waiting indefinitely.

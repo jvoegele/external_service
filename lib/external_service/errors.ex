@@ -46,10 +46,11 @@ defmodule ExternalService.RateLimited do
     * `:retry_after` — milliseconds until the call would have been admitted, as
       reported by the rate limiter backend.
 
-  Only services configured with `rate_limit: [wait: ...]` can produce this error;
-  the default (`wait: :infinity`) waits as long as it takes. Because the wrapped
-  function never ran, this does *not* melt the circuit breaker and is not
-  retried — retrying immediately would only be throttled again.
+  Only services that bound the wait — `rate_limit: [wait: false]` or a millisecond
+  budget — can produce this error; `wait: :infinity`, and leaving `:wait` unset,
+  wait as long as it takes instead. Because the wrapped function never ran, this
+  does *not* melt the circuit breaker and is not retried — retrying immediately
+  would only be throttled again.
   """
   use Errata.InfrastructureError,
     default_message: "the call was throttled beyond the configured rate limit wait time"
