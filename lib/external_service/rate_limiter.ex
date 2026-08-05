@@ -212,6 +212,17 @@ defmodule ExternalService.RateLimiter do
   def new(_service, nil, _opts), do: nil
 
   def new(service, options, opts) when is_list(options) do
+    if Keyword.fetch!(options, :limit) == :infinity do
+      # Indistinguishable from having no `:rate_limit` at all, which is exactly
+      # the point: a child spec override can replace a key but cannot remove one,
+      # so `limit: :infinity` is how an inherited limit is switched off.
+      nil
+    else
+      build(service, options, opts)
+    end
+  end
+
+  defp build(service, options, opts) do
     # `:wait` governs the runtime rather than the backend, so it is taken out
     # before the remaining options are handed over. It has no schema default, so
     # an absent key arrives here as `nil` — "never set", which waits like

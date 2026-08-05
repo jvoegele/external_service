@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **`circuit_breaker: [tolerate: :infinity]` installs no breaker at all**
+  ([issue #55](https://github.com/jvoegele/external_service/issues/55)). It never
+  opens, ignores melts, and holds no state. Useful in production for a service
+  where opening the breaker is worse than the failures it would prevent, and in
+  tests because a breaker with no state cannot leak between them. Rejected in
+  combination with `:fault_injection`, which exists to open the breaker — the
+  contradiction raises at `start/2` rather than letting either option silently
+  win.
+- **`rate_limit: [limit: :infinity]` installs no limiter at all.** Calls pass
+  straight through, exactly as if `:rate_limit` had been omitted. It exists for
+  the case where omitting is not possible: child spec overrides are deep merged,
+  so they can replace a key but never remove one.
+
+  Together these are the answer to #55's "first-class test mode" question. Both
+  are exact where `tolerate: 1_000_000` was only large, and both are meaningful
+  outside tests, so neither is API whose only purpose is switching the library
+  off. The [Testing](testing.md) guide now shows the combination, and says
+  plainly that a service made inert is not a service being tested.
+
 ## [2.4.0] - 2026-08-05
 
 ### Added

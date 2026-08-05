@@ -184,6 +184,38 @@ defmodule ExternalService.TestingGuideExamplesTest do
     end
   end
 
+  describe "making a service inert" do
+    test "the three :infinity/1 keys leave nothing that can interfere", %{service: service} do
+      ExternalService.start(service,
+        circuit_breaker: [tolerate: :infinity],
+        rate_limit: [limit: :infinity, per: :timer.seconds(1)],
+        retry: [max_attempts: 1]
+      )
+
+      # Neither mechanism accumulates anything, so no volume of calls or melts
+      # changes what the next test sees.
+      for n <- 1..200 do
+        assert ExternalService.call(service, fn -> n end) == n
+      end
+
+      Enum.each(1..200, fn _ -> CircuitBreaker.melt(service) end)
+
+      assert ExternalService.available?(service)
+      refute ExternalService.rate_limited?(service)
+    end
+
+    test "one attempt turns a :retry return into RetriesExhausted", %{service: service} do
+      ExternalService.start(service,
+        circuit_breaker: [tolerate: :infinity],
+        retry: [max_attempts: 1]
+      )
+
+      # The guarded call is inert, not transparent: the :retry sentinel belongs
+      # to the library and does not reach the caller.
+      assert {:error, %RetriesExhausted{}} = ExternalService.call(service, fn -> :retry end)
+    end
+  end
+
   describe "shared service state" do
     test "a service term is global, so two names are two independent breakers" do
       one = :"#{__MODULE__}.independent_one"

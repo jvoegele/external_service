@@ -98,6 +98,9 @@ circuit_breaker: [
   within: :timer.seconds(1),  # window ms (default 10_000)
   reset: :timer.seconds(5)    # ms open before reset (default 60_000)
 ]
+
+circuit_breaker: [tolerate: :infinity]   # no breaker at all;
+                                         # never opens, holds no state
 ```
 
 ### Trip the cluster together
@@ -146,6 +149,8 @@ rate_limit: [
   per: :timer.seconds(1),   # window ms
   wait: :timer.seconds(1)   # :infinity | ms | false
 ]                           # unset waits forever, and warns
+
+rate_limit: [limit: :infinity, per: 1_000]   # no limiter at all
 ```
 
 Burst up to `limit`, then paced at `per / limit`.
@@ -282,3 +287,52 @@ rescue
   nil
 )
 ```
+
+## Testing
+{: .col-2}
+
+### Make a service inert
+
+```elixir
+# test.exs child spec override
+{MyApp.Api,
+ circuit_breaker: [tolerate: :infinity],
+ rate_limit: [limit: :infinity],
+ retry: [max_attempts: 1]}
+```
+
+Both `:infinity` keys remove state, so nothing leaks between tests.
+
+### Isolate per test
+
+```elixir
+setup context do
+  service = :"#{context.module}.#{context.test}"
+  on_exit(fn -> ExternalService.stop(service) end)
+  {:ok, service: service}
+end
+```
+
+### Force the failure paths
+
+```elixir
+# open the breaker (tolerate + 1 melts)
+Enum.each(0..tolerate, fn _ ->
+  ExternalService.CircuitBreaker.melt(svc)
+end)
+
+# spend the rate limit budget
+ExternalService.RateLimiter.request(svc)
+
+# fail a fraction of calls
+circuit_breaker: [fault_injection: 0.25]
+```
+
+### Keep it off the clock
+
+```elixir
+retry: [max_attempts: 3, base: 0]   # instant retries
+rate_limit: [wait: false]           # shed, don't wait
+```
+
+Never `sleep_function: fn _ -> :ok end` — it busy-waits.

@@ -100,13 +100,15 @@ defmodule ExternalService do
 
   @circuit_breaker_schema [
     tolerate: [
-      type: :pos_integer,
+      type: {:or, [:pos_integer, {:in, [:infinity]}]},
       default: 10,
       doc:
         "Number of failed **attempts** tolerated within the `:within` window before the " <>
           "breaker opens. Every failing retry attempt melts the breaker, so a single " <>
           "`call/3` with `max_attempts: 5` contributes up to 5 of them — `:tolerate` and " <>
-          "`:max_attempts` cannot be tuned independently."
+          "`:max_attempts` cannot be tuned independently. `:infinity` installs no breaker " <>
+          "at all: it never opens, holds no state, and cannot be combined with " <>
+          "`:fault_injection`."
     ],
     within: [
       type: :pos_integer,
@@ -135,9 +137,14 @@ defmodule ExternalService do
 
   @rate_limit_schema [
     limit: [
-      type: :pos_integer,
+      type: {:or, [:pos_integer, {:in, [:infinity]}]},
       required: true,
-      doc: "Maximum number of calls allowed within each `:per` window."
+      doc:
+        "Maximum number of calls allowed within each `:per` window. `:infinity` installs " <>
+          "no limiter at all — calls pass straight through, exactly as if `:rate_limit` " <>
+          "had been omitted. It is meant for overriding a configured limit (a child spec " <>
+          "override cannot remove a key); to have no rate limiting in the first place, " <>
+          "omit `:rate_limit`. `:per` is still required, and ignored."
     ],
     per: [
       type: :pos_integer,
@@ -251,6 +258,7 @@ defmodule ExternalService do
   @spec start(service(), options()) :: :ok
   def start(service, options \\ []) do
     options = NimbleOptions.validate!(options, @start_schema)
+    validate_breaker_combination!(service, options[:circuit_breaker])
 
     circuit_breaker = CircuitBreaker.install(service, options[:circuit_breaker])
 
@@ -267,6 +275,33 @@ defmodule ExternalService do
     warn_unbounded_retries(service, retry_options)
 
     State.init(service, circuit_breaker, rate_limit, retry_options)
+    :ok
+  end
+
+  # `:fault_injection` exists to make a breaker report blown; `tolerate: :infinity`
+  # promises it never will. Silently letting either win would make the other
+  # option a lie, so the combination is rejected where it is written.
+  defp validate_breaker_combination!(service, circuit_breaker_options) do
+    tolerate = circuit_breaker_options[:tolerate]
+    fault_injection = circuit_breaker_options[:fault_injection]
+
+    if tolerate == :infinity and not is_nil(fault_injection) do
+      raise ArgumentError, """
+      ExternalService.start(#{inspect(service)}, ...) sets both \
+      circuit_breaker: [tolerate: :infinity] and :fault_injection, which contradict \
+      each other. :tolerate: :infinity installs no breaker, so there is nothing for \
+      :fault_injection to blow.
+
+      Drop whichever you did not mean:
+
+          # a breaker that never opens
+          circuit_breaker: [tolerate: :infinity]
+
+          # a breaker that fails #{inspect(fault_injection)} of calls, for testing dependents
+          circuit_breaker: [fault_injection: #{inspect(fault_injection)}]
+      """
+    end
+
     :ok
   end
 
