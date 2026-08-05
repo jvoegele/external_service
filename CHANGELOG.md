@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-08-05
+
 ### Added
 - **`ExternalService.start/2` now warns when a service configures no retry
   bound** ([issue #43](https://github.com/jvoegele/external_service/issues/43)).
@@ -397,7 +399,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/2.3.0...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/2.4.0...HEAD
+[2.4.0]: https://github.com/jvoegele/external_service/compare/2.3.0...2.4.0
 [2.3.0]: https://github.com/jvoegele/external_service/compare/2.2.0...2.3.0
 [2.2.0]: https://github.com/jvoegele/external_service/compare/2.1.0...2.2.0
 [2.1.0]: https://github.com/jvoegele/external_service/compare/2.0.0...2.1.0
