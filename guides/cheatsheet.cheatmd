@@ -92,7 +92,9 @@ end
 
 ```elixir
 circuit_breaker: [
-  tolerate: 5,                # failures per window (default 10)
+  tolerate: 5,                # failed ATTEMPTS per window (default 10);
+                              # retries melt too, so tolerate ≈
+                              # failing calls × max_attempts
   within: :timer.seconds(1),  # window ms (default 10_000)
   reset: :timer.seconds(5)    # ms open before reset (default 60_000)
 ]

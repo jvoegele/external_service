@@ -102,7 +102,11 @@ defmodule ExternalService do
     tolerate: [
       type: :pos_integer,
       default: 10,
-      doc: "Number of failures tolerated within the `:within` window before the breaker opens."
+      doc:
+        "Number of failed **attempts** tolerated within the `:within` window before the " <>
+          "breaker opens. Every failing retry attempt melts the breaker, so a single " <>
+          "`call/3` with `max_attempts: 5` contributes up to 5 of them — `:tolerate` and " <>
+          "`:max_attempts` cannot be tuned independently."
     ],
     within: [
       type: :pos_integer,

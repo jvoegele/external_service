@@ -166,6 +166,11 @@ retry: [max_attempts: 5, expiry: :timer.seconds(5), backoff: :exponential, base:
 > any 10-second window, so the melt count tops out at 7 against a `:tolerate` of
 > 10. The breaker never opens and the call never returns. Always set an explicit
 > `:max_attempts` or `:expiry` — and a `:cap`, below — for unattended retries.
+>
+> The coupling runs the other way too: every failing attempt melts the breaker,
+> so a bounded `:max_attempts` makes the breaker open *sooner* than `:tolerate`
+> suggests. See
+> [`:tolerate` counts attempts, not calls](circuit-breakers.md#what-counts-as-a-failure).
 
 ### Unbounded retries are a choice, not a default to fall into
 
