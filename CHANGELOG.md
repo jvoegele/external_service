@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **A per-service concurrency limit — the bulkhead pattern**
+  ([issue #49](https://github.com/jvoegele/external_service/issues/49)).
+  `concurrency: [limit: 25, reclaim_after: :timer.seconds(30)]` caps how many
+  calls may be in flight against a service at once. Over the limit, calls fail
+  immediately with the new `ExternalService.ServiceSaturated` error rather than
+  queueing — queueing is what the rate limiter's `:wait` budget is for, and a
+  queue is the pile-up this exists to prevent.
+
+  This closes the gap that opens when a service degrades rather than fails. The
+  breaker counts failures, so slow-but-successful calls are invisible to it; the
+  rate limiter counts *starts*, not concurrency, so `limit: 100, per: 1_000`
+  against a service that slows to 10 seconds per call leaves roughly a thousand
+  processes parked in the same call, each holding a connection.
+
+  Saturation is your own backpressure rather than the service's failure, so it
+  does not melt the circuit breaker and is not retried — exactly like
+  `ExternalService.RateLimited`. `ServiceSaturated` maps to `503` rather than
+  `429` for the same reason: it is your application shedding load, not the
+  external service refusing you.
+
+  State is an `:atomics` array with one slot per permit — no process, supervisor,
+  or registry, the same design as `ExternalService.RateLimiter.Local`, at roughly
+  0.4µs for an uncontended acquire and release. Slots are taken per *attempt* and
+  inside the rate limiter, so a call sitting in backoff or sleeping on a `:wait`
+  budget holds no capacity.
+- **`:reclaim_after` bounds how long a slot may be held before it is reused.**
+  A slot is released whenever the call finishes, raises, throws, or exits — but
+  not when the calling process is killed from outside, because an exit signal
+  does not run `after` blocks. That includes the ordinary `:shutdown` a
+  supervisor sends while draining, so it is not an edge case. Without expiry each
+  such caller would burn a slot permanently and the service would ratchet toward
+  wedged; `:reclaim_after` bounds the damage to one slot for one window. It is
+  required rather than defaulted because it must exceed the longest legitimate
+  call, which depends on a client timeout the library cannot see.
+- **`ExternalService.saturated?/1`** (with a generated `saturated?/0`), plus
+  `ExternalService.Concurrency.in_flight/1` and `limit/1`, completing the trio
+  with `available?/1` and `rate_limited?/1`. `reset_all/1` frees every slot.
+- **`[:external_service, :concurrency, :rejected]` telemetry**, and a new
+  [Concurrency Limiting](concurrency.md) guide.
+
 ### Changed
 - **Documented that `ExternalService` imposes no timeout**
   ([issue #44](https://github.com/jvoegele/external_service/issues/44)). The

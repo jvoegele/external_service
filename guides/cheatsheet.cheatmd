@@ -194,6 +194,32 @@ ExternalService.RateLimiter.peek(:api)   # :ok | {:wait, ms}
 ExternalService.RateLimiter.request(:api)
 ```
 
+## Concurrency limit
+{: .col-2}
+
+### Options
+
+```elixir
+concurrency: [
+  limit: 25,                        # calls in flight at once
+  reclaim_after: :timer.seconds(30) # slot expiry; must exceed
+]                                   # your client timeout
+```
+
+Over the limit, calls fail fast — they do not queue.
+
+### Errors & introspection
+
+```elixir
+{:error, %ExternalService.ServiceSaturated{
+  context: %{limit: l, in_flight: n}}}   # http_status 503
+
+ExternalService.saturated?(:svc)
+ExternalService.Concurrency.in_flight(:svc)
+```
+
+Saturation does not melt the breaker and is not retried.
+
 ## Retry options
 {: .col-2}
 
@@ -274,6 +300,7 @@ rescue
 [:external_service, :call, :retry]
 [:external_service, :circuit_breaker, :blown]
 [:external_service, :rate_limit, :sleep]
+[:external_service, :concurrency, :rejected]
 ```
 
 ### Attach

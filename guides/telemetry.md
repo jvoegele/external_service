@@ -58,6 +58,15 @@ rate limit.
 - **Measurements:** `:sleep_time` (milliseconds)
 - **Metadata:** `:service`
 
+### `[:external_service, :concurrency, :rejected]`
+
+Emitted when a call is shed because the service's concurrency limit was fully in
+use. A steady trickle usually means the limit is too low for normal traffic; a
+sudden spike is the dependency slowing down.
+
+- **Measurements:** `:limit` (the configured concurrency limit)
+- **Metadata:** `:service`
+
 > #### Event names are a stable contract {: .info}
 >
 > The event names use `:circuit_breaker` (not the underlying `:fuse`)
@@ -78,7 +87,8 @@ A minimal handler that logs retries and breaker trips:
   [
     [:external_service, :call, :retry],
     [:external_service, :circuit_breaker, :blown],
-    [:external_service, :rate_limit, :sleep]
+    [:external_service, :rate_limit, :sleep],
+    [:external_service, :concurrency, :rejected]
   ],
   &MyApp.ServiceTelemetry.handle_event/4,
   nil

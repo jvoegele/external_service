@@ -57,6 +57,7 @@ defmodule ExternalService do
 
   alias ExternalService.CircuitBreaker
   alias ExternalService.CircuitBreakerOpen
+  alias ExternalService.Concurrency
   alias ExternalService.RateLimited
   alias ExternalService.RateLimiter
   alias ExternalService.RetriesExhausted
@@ -172,6 +173,26 @@ defmodule ExternalService do
     ]
   ]
 
+  @concurrency_schema [
+    limit: [
+      type: :pos_integer,
+      required: true,
+      doc: "Maximum number of calls allowed to be in flight against the service at once."
+    ],
+    reclaim_after: [
+      type: :pos_integer,
+      required: true,
+      doc:
+        "Milliseconds after which a held slot is considered abandoned and may be reused. " <>
+          "A slot is normally released as soon as the call finishes, but a caller killed " <>
+          "from outside — including by the ordinary `:shutdown` a supervisor sends while " <>
+          "draining — never runs its release. This bounds how long such a slot is lost. " <>
+          "Required rather than defaulted: it must exceed the longest legitimate call, " <>
+          "which depends on the timeout configured in your HTTP client. Setting it too " <>
+          "low silently admits more than `:limit`."
+    ]
+  ]
+
   @start_schema [
     circuit_breaker: [
       type: :keyword_list,
@@ -183,6 +204,13 @@ defmodule ExternalService do
       type: :keyword_list,
       keys: @rate_limit_schema,
       doc: "Optional rate-limiting configuration. Omit for no rate limiting."
+    ],
+    concurrency: [
+      type: :keyword_list,
+      keys: @concurrency_schema,
+      doc:
+        "Optional concurrency limit (the bulkhead pattern). Omit for no limit. See " <>
+          "`ExternalService.Concurrency`."
     ],
     retry: [
       type: {:or, [:keyword_list, {:struct, RetryOptions}]},
@@ -210,20 +238,22 @@ defmodule ExternalService do
     # lock-free reads with no process to message or crash. This replaces the
     # previous unsupervised `Agent`.
 
-    defstruct [:service, :circuit_breaker, :rate_limit, :retry_options]
+    defstruct [:service, :circuit_breaker, :rate_limit, :concurrency, :retry_options]
 
     @type t :: %__MODULE__{
             service: ExternalService.service(),
             circuit_breaker: ExternalService.CircuitBreaker.t(),
             rate_limit: ExternalService.RateLimiter.t(),
+            concurrency: ExternalService.Concurrency.t(),
             retry_options: ExternalService.RetryOptions.t()
           }
 
-    def init(service, circuit_breaker, rate_limit, retry_options) do
+    def init(service, circuit_breaker, rate_limit, concurrency, retry_options) do
       state = %__MODULE__{
         service: service,
         circuit_breaker: circuit_breaker,
         rate_limit: rate_limit,
+        concurrency: concurrency,
         retry_options: retry_options
       }
 
@@ -271,10 +301,12 @@ defmodule ExternalService do
 
     warn_unbounded_wait(service, rate_limit, options[:rate_limit])
 
+    concurrency = Concurrency.new(service, options[:concurrency])
+
     retry_options = RetryOptions.new(options[:retry])
     warn_unbounded_retries(service, retry_options)
 
-    State.init(service, circuit_breaker, rate_limit, retry_options)
+    State.init(service, circuit_breaker, rate_limit, concurrency, retry_options)
     :ok
   end
 
@@ -403,8 +435,8 @@ defmodule ExternalService do
   def reset(service), do: CircuitBreaker.reset(service)
 
   @doc """
-  Resets every stateful mechanism for the given service: the circuit breaker and
-  the rate limiter.
+  Resets every stateful mechanism for the given service: the circuit breaker, the
+  rate limiter, and the concurrency limit.
 
   `reset/1` closes the breaker only, and deliberately leaves the rate limiter
   alone — clearing a limiter in production releases a burst at the service, which
@@ -429,8 +461,9 @@ defmodule ExternalService do
   """
   @spec reset_all(service()) :: :ok | {:error, :not_found}
   def reset_all(service) do
-    with :ok <- CircuitBreaker.reset(service) do
-      RateLimiter.reset(service)
+    with :ok <- CircuitBreaker.reset(service),
+         :ok <- RateLimiter.reset(service) do
+      Concurrency.reset(service)
     end
   end
 
@@ -466,6 +499,27 @@ defmodule ExternalService do
   """
   @spec blown?(service()) :: boolean()
   def blown?(service), do: CircuitBreaker.ask(service) == :blown
+
+  @doc """
+  Returns `true` if `service` has no concurrency slot free right now.
+
+  Completes the trio with `available?/1` (is the breaker closed?) and
+  `rate_limited?/1` (would a call be throttled?). A service with no
+  `:concurrency` limit configured — including one that was never started — is
+  never saturated, since nothing is holding calls back.
+
+  Like the others this is a best-effort signal: a slot can be taken or released
+  between the check and a subsequent call, so it lets you bail out early rather
+  than replacing handling of `ExternalService.ServiceSaturated` from the call
+  itself.
+  """
+  @spec saturated?(service()) :: boolean()
+  def saturated?(service) do
+    case Concurrency.limit(service) do
+      nil -> false
+      limit -> Concurrency.in_flight(service) >= limit
+    end
+  end
 
   @doc """
   Returns `true` only if every service in `fuse_names` is `available?/1`.
@@ -553,6 +607,7 @@ defmodule ExternalService do
         {:error, {:circuit_breaker_open, service}} -> {:error, circuit_breaker_open(service)}
         {:error, {:not_started, service}} -> {:error, service_not_started(service)}
         {:error, {:rate_limited, service, after_ms}} -> {:error, rate_limited(service, after_ms)}
+        {:error, {:saturated, service}} -> {:error, Concurrency.error(service)}
       end
     end)
   end
@@ -578,6 +633,7 @@ defmodule ExternalService do
         {:error, {:circuit_breaker_open, service}} -> raise circuit_breaker_open(service)
         {:error, {:not_started, service}} -> raise service_not_started(service)
         {:error, {:rate_limited, service, after_ms}} -> raise rate_limited(service, after_ms)
+        {:error, {:saturated, service}} -> raise Concurrency.error(service)
       end
     end)
   end
@@ -678,6 +734,7 @@ defmodule ExternalService do
           | {:error, {:circuit_breaker_open, service()}}
           | {:error, {:not_started, service()}}
           | {:error, {:rate_limited, service(), non_neg_integer()}}
+          | {:error, {:saturated, service()}}
   defp call_with_retry(service, retry_opts, function) do
     # The service state is read once per call rather than once per attempt: it is
     # written by `start/2` and never changes, and it is what tells us whether the
@@ -717,6 +774,9 @@ defmodule ExternalService do
 
     {:rate_limited, retry_after} ->
       {:error, {:rate_limited, service, retry_after}}
+
+    :saturated ->
+      {:error, {:saturated, service}}
   end
 
   defp apply_retry_options(retry_opts) do
@@ -764,7 +824,18 @@ defmodule ExternalService do
   @spec try_function(service, State.t(), RetryOptions.t(), retriable_function) ::
           {:error, {:retry, any}} | {:error, :retry} | {:no_retry, any} | no_return
   defp try_function(service, state, retry_opts, function) do
-    case RateLimiter.call(state.rate_limit, function) do
+    # The concurrency slot is taken inside the rate limiter rather than around
+    # it, so a caller sleeping on the `:wait` budget holds no slot: the limit
+    # counts calls actually in flight against the service. It is per attempt,
+    # so a call sitting in backoff between attempts holds nothing either.
+    guarded = fn -> Concurrency.call(state.concurrency, function) end
+
+    case RateLimiter.call(state.rate_limit, guarded) do
+      # No slot was free. The wrapped function never ran, so as with rate
+      # limiting there is nothing to retry and no failure to melt the breaker.
+      {Concurrency, :saturated} ->
+        throw(:saturated)
+
       # The wrapped function never ran, so there is nothing to retry and no
       # failure to hold against the circuit breaker. Thrown rather than returned
       # so that it escapes the retry loop rather than being treated as a result.
@@ -924,7 +995,7 @@ defmodule ExternalService do
     * `call/1`, `call/2`, `call!/1`, `call!/2`
     * `call_async/1`, `call_async/2`
     * `call_async_stream/2`, `call_async_stream/3`, `call_async_stream/4`
-    * `available?/0`, `blown?/0`, `reset/0`, `reset_all/0`
+    * `available?/0`, `blown?/0`, `saturated?/0`, `reset/0`, `reset_all/0`
     * `child_spec/1`, `start_link/1`
   """
   defmacro __using__(opts) do
@@ -1003,6 +1074,9 @@ defmodule ExternalService do
 
       @doc "Returns `true` if the circuit breaker is open. See `ExternalService.blown?/1`."
       def blown?, do: ExternalService.blown?(@__external_service__)
+
+      @doc "Returns `true` if no concurrency slot is free. See `ExternalService.saturated?/1`."
+      def saturated?, do: ExternalService.saturated?(@__external_service__)
 
       @doc "Resets the circuit breaker. See `ExternalService.reset/1`."
       def reset, do: ExternalService.reset(@__external_service__)
