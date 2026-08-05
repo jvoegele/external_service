@@ -139,7 +139,9 @@ want an explicit bound. There are two, and they compose:
 - **`:max_attempts`** — a count. `max_attempts: 5` means at most five attempts
   total (the first try plus four retries).
 - **`:expiry`** — a time budget in milliseconds. Once cumulative retry time
-  exceeds it, retrying stops.
+  exceeds it, retrying stops. It is checked **between** attempts, so it bounds
+  when the next attempt starts, never how long the current one runs — see
+  [Nothing here bounds a single attempt](#nothing-here-bounds-a-single-attempt).
 
 You can use either or both; whichever is reached first stops the retries. When
 the bound is hit without success, `call/3` returns
@@ -149,6 +151,31 @@ the bound is hit without success, `call/3` returns
 # Stop after 5 attempts OR 5 seconds, whichever comes first.
 retry: [max_attempts: 5, expiry: :timer.seconds(5), backoff: :exponential, base: 100]
 ```
+
+### Nothing here bounds a single attempt
+
+`:expiry` reads like a wall-clock budget for the whole call. It isn't, and the
+difference matters as soon as your function is slow rather than fast-failing.
+Both bounds are evaluated **between** attempts — when the retry machinery decides
+whether to make another one — so neither can interrupt an attempt already
+running.
+
+Measured with `retry: [max_attempts: 4, expiry: 100]` against a function that
+sleeps 300ms and then returns `:retry`:
+
+```
+attempts made: 2
+total elapsed: 706ms
+```
+
+The 100ms budget stopped the third attempt, but the call still took seven times
+the budget, because each attempt ran to completion first. Push that further —
+a function that never returns — and `:expiry` is never evaluated at all, so the
+call hangs forever no matter what you set.
+
+**`ExternalService` imposes no timeout on your function.** Bounding a single
+attempt is the caller's job; see
+[When the service hangs](circuit-breakers.md#when-the-service-hangs).
 
 > #### Don't rely on the circuit breaker to bound retries {: .warning}
 >
