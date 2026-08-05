@@ -72,6 +72,14 @@ defmodule ExternalService.RateLimiter.Hammer do
     if module.get(key, window) < limit, do: :ok, else: {:wait, wait_time(config)}
   end
 
+  @impl true
+  def reset(_service, %{module: module, key: key, window: window}) do
+    # Hammer has no delete, but `set/3` writes the counter directly, and zero is
+    # an untouched window as far as `hit/3` and `get/2` are concerned.
+    _ = module.set(key, window, 0)
+    :ok
+  end
+
   defp wait_time(%{module: module, key: key, window: window} = config) do
     # `expires_at/2` is only defined for algorithms with a discrete window
     # (Hammer's fixed window), and answers an absolute wall-clock timestamp in

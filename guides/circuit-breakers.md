@@ -158,6 +158,19 @@ A few semantics worth knowing:
 failures. It is mainly useful in tests and in operational tooling ("we fixed the
 upstream, stop failing fast now").
 
+It resets **only** the breaker. A service's rate limiter is separate state, and
+clearing it releases a burst at the service — rarely what someone closing a
+breaker intended. When you do want both, `ExternalService.reset_all/1` clears the
+breaker and the limiter together:
+
+```elixir
+ExternalService.reset_all(:payments)
+MyApp.Stripe.reset_all()
+```
+
+That is usually what a test `setup` block wants; see the [Testing](testing.md)
+guide.
+
 ## Reporting a failure the library never saw
 
 The breaker counts failures that happen inside `call/3`. Sometimes a service

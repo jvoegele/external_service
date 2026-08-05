@@ -69,15 +69,38 @@ refute ExternalService.blown?(two)
 > in `setup` works too, but only for the breaker, and only if nothing else is
 > running concurrently.
 
-Where per-test services are impractical, resetting in `setup` gets you most of
-the way:
+Where per-test services are impractical — which is most of the time with a
+front-door module — reset the shared service instead. `ExternalService.reset_all/1`
+clears both stateful mechanisms, so nothing a test does to the breaker or the
+rate limit budget survives into the next one:
 
 ```elixir
 setup do
-  ExternalService.reset(MyApp.Stripe)
+  MyApp.Stripe.reset_all()
   :ok
 end
 ```
+
+Use `reset_all/1` rather than `reset/1` here. `reset/1` closes the breaker and
+deliberately leaves the limiter alone, because clearing a limiter in production
+releases a burst at the service — so a test that drained the budget would leave
+the next one throttled.
+
+Resetting **shares** state rather than isolating it, so it does not make
+concurrent tests independent: two `async: true` tests can still interleave a
+reset with the other's assertions. Which leads to the tiering below.
+
+### Which technique for which test
+
+| Your test | Approach |
+| --- | --- |
+| Business logic that happens to call through | Make the service **inert** (below). No isolation needed — there is no state to share. |
+| Resilience behavior: fallbacks, breaker opening, throttled paths | Real mechanisms + `reset_all/1` in `setup`, and `async: false`. |
+| A service you drive with the functional API | A unique service term per test. Fully isolated, works with `async: true`. |
+
+The middle row is the only one that gives up `async: true`, and it is normally
+the smallest group — those tests are in-memory and fast, so serializing them
+costs little.
 
 ## Keeping tests off the clock
 

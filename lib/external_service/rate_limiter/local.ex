@@ -72,6 +72,14 @@ defmodule ExternalService.RateLimiter.Local do
     if admit_at > now, do: {:wait, to_milliseconds(admit_at - now)}, else: :ok
   end
 
+  @impl true
+  def reset(_service, %{ref: ref}) do
+    # Seeding the TAT with the current time is exactly what `init/2` does: the
+    # bucket reads as drained-and-refilled, so the next `limit` calls burst.
+    :atomics.put(ref, 1, now())
+    :ok
+  end
+
   defp admit(ref, interval, burst, now) do
     tat = :atomics.get(ref, 1)
     # A TAT in the past means the bucket has drained; the call is metered from

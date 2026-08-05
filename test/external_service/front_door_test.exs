@@ -102,6 +102,20 @@ defmodule ExternalService.FrontDoorTest do
       assert Service.reset() == :ok
       assert Service.available?()
     end
+
+    test "reset_all/0 clears the rate limiter as well as the breaker" do
+      # Spend the whole burst, then trip the breaker.
+      Enum.each(1..100, fn _ -> ExternalService.RateLimiter.request(:front_door_service) end)
+      Service.call([max_attempts: 10], fn -> :retry end)
+
+      assert Service.blown?()
+      assert ExternalService.rate_limited?(:front_door_service)
+
+      assert Service.reset_all() == :ok
+
+      assert Service.available?()
+      refute ExternalService.rate_limited?(:front_door_service)
+    end
   end
 
   describe "deprecated ExternalService.Gateway" do

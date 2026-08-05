@@ -313,6 +313,17 @@ setup context do
 end
 ```
 
+### Or reset shared state
+
+```elixir
+setup do
+  MyApp.Api.reset_all()   # breaker + limiter
+  :ok
+end
+```
+
+`reset/0` clears only the breaker.
+
 ### Force the failure paths
 
 ```elixir

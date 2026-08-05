@@ -204,4 +204,78 @@ defmodule ExternalService.ControlApiTest do
       assert ExternalService.available?(service)
     end
   end
+
+  describe "RateLimiter.reset/1" do
+    test "returns a spent budget to full" do
+      service = start_service(rate_limit: [limit: 2, per: :timer.minutes(1), wait: false])
+
+      assert RateLimiter.request(service) == :ok
+      assert RateLimiter.request(service) == :ok
+      assert {:error, %RateLimited{}} = RateLimiter.request(service)
+
+      assert RateLimiter.reset(service) == :ok
+
+      # The whole burst is available again, not just one call's worth.
+      assert RateLimiter.request(service) == :ok
+      assert RateLimiter.request(service) == :ok
+    end
+
+    test "a service with no rate limit has nothing to reset" do
+      service = start_service(circuit_breaker: [tolerate: 1])
+      assert RateLimiter.reset(service) == :ok
+    end
+
+    test "reports an unstarted service" do
+      assert RateLimiter.reset(:never_started_service) == {:error, :not_found}
+    end
+
+    test "does not touch the circuit breaker" do
+      service =
+        start_service(
+          circuit_breaker: [tolerate: 1, within: :timer.seconds(10)],
+          rate_limit: [limit: 1, per: :timer.minutes(1), wait: false]
+        )
+
+      Enum.each(1..2, fn _ -> CircuitBreaker.melt(service) end)
+      assert ExternalService.blown?(service)
+
+      assert RateLimiter.reset(service) == :ok
+      assert ExternalService.blown?(service)
+    end
+  end
+
+  describe "ExternalService.reset_all/1" do
+    test "clears the breaker and the rate limiter together" do
+      service =
+        start_service(
+          circuit_breaker: [tolerate: 1, within: :timer.seconds(10)],
+          rate_limit: [limit: 1, per: :timer.minutes(1), wait: false]
+        )
+
+      Enum.each(1..2, fn _ -> CircuitBreaker.melt(service) end)
+      assert RateLimiter.request(service) == :ok
+
+      assert ExternalService.blown?(service)
+      assert {:error, %RateLimited{}} = RateLimiter.request(service)
+
+      assert ExternalService.reset_all(service) == :ok
+
+      assert ExternalService.available?(service)
+      assert RateLimiter.request(service) == :ok
+    end
+
+    test "resets just the breaker for a service with no rate limit" do
+      service = start_service(circuit_breaker: [tolerate: 1, within: :timer.seconds(10)])
+
+      Enum.each(1..2, fn _ -> CircuitBreaker.melt(service) end)
+      assert ExternalService.blown?(service)
+
+      assert ExternalService.reset_all(service) == :ok
+      assert ExternalService.available?(service)
+    end
+
+    test "reports an unstarted service" do
+      assert ExternalService.reset_all(:never_started_service) == {:error, :not_found}
+    end
+  end
 end

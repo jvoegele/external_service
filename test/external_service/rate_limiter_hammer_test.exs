@@ -19,6 +19,22 @@ defmodule ExternalService.RateLimiter.HammerTest do
     :ok
   end
 
+  describe "reset/2" do
+    test "returns a spent budget to full" do
+      {:ok, config} =
+        HammerBackend.init(:resettable, limit: 2, per: 60_000, module: HammerLimiter)
+
+      assert HammerBackend.check(:resettable, config) == :ok
+      assert HammerBackend.check(:resettable, config) == :ok
+      assert {:wait, _} = HammerBackend.check(:resettable, config)
+
+      assert HammerBackend.reset(:resettable, config) == :ok
+
+      assert HammerBackend.check(:resettable, config) == :ok
+      assert HammerBackend.peek(:resettable, config) == :ok
+    end
+  end
+
   describe "init/2" do
     test "derives a key from the service name" do
       assert {:ok, config} =

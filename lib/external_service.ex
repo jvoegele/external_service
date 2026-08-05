@@ -403,6 +403,38 @@ defmodule ExternalService do
   def reset(service), do: CircuitBreaker.reset(service)
 
   @doc """
+  Resets every stateful mechanism for the given service: the circuit breaker and
+  the rate limiter.
+
+  `reset/1` closes the breaker only, and deliberately leaves the rate limiter
+  alone — clearing a limiter in production releases a burst at the service, which
+  is rarely what someone closing a breaker meant to do. This function is for when
+  you do want a clean slate.
+
+  Its main use is between tests. A service's state is global — it lives in
+  `:persistent_term` and `:fuse`, keyed on the service term — so a test that
+  trips the breaker or drains the rate limit budget leaves it that way for
+  whatever runs next:
+
+      setup do
+        ExternalService.reset_all(MyApp.Stripe)
+        :ok
+      end
+
+  A service with no rate limit configured resets just the breaker. One that was
+  never started answers `{:error, :not_found}`, exactly as `reset/1` does.
+
+  Note that this shares state rather than isolating it, so it does not make
+  concurrent tests independent — see the [Testing](testing.md) guide.
+  """
+  @spec reset_all(service()) :: :ok | {:error, :not_found}
+  def reset_all(service) do
+    with :ok <- CircuitBreaker.reset(service) do
+      RateLimiter.reset(service)
+    end
+  end
+
+  @doc """
   Returns `true` if the service is currently available, meaning its circuit
   breaker is not blown.
 
@@ -892,7 +924,7 @@ defmodule ExternalService do
     * `call/1`, `call/2`, `call!/1`, `call!/2`
     * `call_async/1`, `call_async/2`
     * `call_async_stream/2`, `call_async_stream/3`, `call_async_stream/4`
-    * `available?/0`, `blown?/0`, `reset/0`
+    * `available?/0`, `blown?/0`, `reset/0`, `reset_all/0`
     * `child_spec/1`, `start_link/1`
   """
   defmacro __using__(opts) do
@@ -974,6 +1006,9 @@ defmodule ExternalService do
 
       @doc "Resets the circuit breaker. See `ExternalService.reset/1`."
       def reset, do: ExternalService.reset(@__external_service__)
+
+      @doc "Resets the circuit breaker and the rate limiter. See `ExternalService.reset_all/1`."
+      def reset_all, do: ExternalService.reset_all(@__external_service__)
     end
   end
 end

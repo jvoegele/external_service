@@ -33,6 +33,12 @@ defmodule ExternalService.Test.StubLimiter do
     end
   end
 
+  @impl true
+  def reset(_service, _config) do
+    Process.delete(@denials)
+    :ok
+  end
+
   @doc "Makes the next `count` checks report `{:wait, _}`."
   def deny_next(count), do: Process.put(@denials, count)
 

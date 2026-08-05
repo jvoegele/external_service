@@ -184,6 +184,44 @@ defmodule ExternalService.TestingGuideExamplesTest do
     end
   end
 
+  describe "resetting shared state between tests" do
+    test "reset_all/1 clears the breaker and the rate limit budget", %{service: service} do
+      ExternalService.start(service,
+        circuit_breaker: [tolerate: 1, within: :timer.seconds(10)],
+        rate_limit: [limit: 1, per: :timer.minutes(1), wait: false],
+        retry: [max_attempts: 1]
+      )
+
+      # Leave the service in the state a messy test would leave it in.
+      Enum.each(1..2, fn _ -> CircuitBreaker.melt(service) end)
+      assert RateLimiter.request(service) == :ok
+
+      assert ExternalService.blown?(service)
+      assert ExternalService.rate_limited?(service)
+
+      assert ExternalService.reset_all(service) == :ok
+
+      assert ExternalService.available?(service)
+      refute ExternalService.rate_limited?(service)
+    end
+
+    test "reset/1 deliberately leaves the rate limiter alone", %{service: service} do
+      ExternalService.start(service,
+        circuit_breaker: [tolerate: 1, within: :timer.seconds(10)],
+        rate_limit: [limit: 1, per: :timer.minutes(1), wait: false],
+        retry: [max_attempts: 1]
+      )
+
+      assert RateLimiter.request(service) == :ok
+      assert ExternalService.rate_limited?(service)
+
+      assert ExternalService.reset(service) == :ok
+
+      # Still throttled — which is why a test setup wants reset_all/1.
+      assert ExternalService.rate_limited?(service)
+    end
+  end
+
   describe "making a service inert" do
     test "the three :infinity/1 keys leave nothing that can interfere", %{service: service} do
       ExternalService.start(service,
