@@ -11,10 +11,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 - **A per-service concurrency limit — the bulkhead pattern**
   ([issue #49](https://github.com/jvoegele/external_service/issues/49)).
   `concurrency: [limit: 25, reclaim_after: :timer.seconds(30)]` caps how many
-  calls may be in flight against a service at once. Over the limit, calls fail
-  immediately with the new `ExternalService.ServiceSaturated` error rather than
-  queueing — queueing is what the rate limiter's `:wait` budget is for, and a
-  queue is the pile-up this exists to prevent.
+  calls may be in flight against a service at once. Over the limit a call is not
+  dropped: it returns the new `ExternalService.ServiceSaturated` error to its
+  caller, which is free to enqueue the work, serve something stale, or answer
+  503. There is no cooldown — unlike the circuit breaker, a slot is available
+  again the instant the call holding it finishes, so recovery is continuous.
 
   This closes the gap that opens when a service degrades rather than fails. The
   breaker counts failures, so slow-but-successful calls are invisible to it; the
