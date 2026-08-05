@@ -237,18 +237,34 @@ rate limit. See `ExternalService.Flow` for details.
 
 ## Customizing the sleep
 
-By default sleeping uses `Process.sleep/1`. In tests — where you don't want real
-delays — you can override it with `:sleep_function`:
+By default sleeping uses `Process.sleep/1`. You can substitute your own with
+`:sleep_function`, which receives the number of milliseconds the library would
+otherwise sleep:
 
 ```elixir
 use ExternalService,
-  rate_limit: [limit: 100, per: :timer.seconds(1)],
-  sleep_function: fn _ms -> :ok end
+  rate_limit: [limit: 100, per: :timer.seconds(1), wait: :timer.seconds(1)],
+  sleep_function: fn ms ->
+    :ok = MyApp.Metrics.record_throttle(ms)
+    Process.sleep(ms)
+  end
 ```
 
-The function receives the number of milliseconds the library would otherwise
-sleep. This is also where you'd hook in deterministic test control or custom
-instrumentation.
+This is an **instrumentation hook**, not a way to skip the wait.
+
+> #### A no-op sleep function busy-waits {: .warning}
+>
+> `sleep_function: fn _ms -> :ok end` looks like it makes throttled calls
+> instant in tests. It does not. The limiter is asked again immediately, still
+> says wait, and the loop spins until real time has actually passed — so the call
+> takes just as long and burns a core doing it.
+>
+> Measured at `limit: 1, per: 2_000` with a counting no-op: the throttled call
+> still took **2000ms**, and the sleep function was invoked **2,075,418 times**.
+>
+> To keep a rate-limited test off the clock, use `wait: false` and assert on the
+> `ExternalService.RateLimited` error, or configure a limit the test never
+> reaches. See the [Testing](testing.md) guide.
 
 ## Observing throttling
 

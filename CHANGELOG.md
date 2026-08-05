@@ -29,6 +29,17 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   only for services that configure `:rate_limit`. `wait: :infinity` states the
   unbounded intent explicitly and silences it.
 
+- **A [Testing](testing.md) guide**
+  ([issue #45](https://github.com/jvoegele/external_service/issues/45)). Covers
+  the thing an adopter hits first and the guides never addressed: service state
+  is global — it lives in `:persistent_term` and `:fuse` keyed on the service
+  term — so nothing is torn down between tests and `async: true` tests sharing a
+  service share one breaker and one rate-limit bucket. Also covers keeping tests
+  off the clock, driving the breaker and limiter directly to reach failure paths,
+  and asserting on telemetry. Every example is executed as part of this library's
+  suite (`test/testing_guide_examples_test.exs`), so the guide cannot drift from
+  the API.
+
 ### Changed
 - **The `:max_attempts` documentation no longer describes the circuit breaker as
   a bound on retries**, because it isn't one in the general case (see above).
@@ -54,6 +65,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   is the forward-compatible way to keep waiting indefinitely.
 
 ### Fixed
+- **The `:sleep_function` documentation no longer recommends a no-op for tests.**
+  `sleep_function: fn _ms -> :ok end` was presented as the way to avoid real
+  delays under a rate limit. It does not avoid them: the limiter is asked again
+  immediately, still says wait, and the loop spins until real time has passed.
+  Measured at `limit: 1, per: 2_000`, the throttled call still took 2000ms and
+  invoked the no-op 2,075,418 times — the same wall clock, with a core burned.
+  `:sleep_function` is documented as an instrumentation hook, and the Testing
+  guide points at `wait: false` for keeping rate limited tests fast.
 - **`guides/` is now included in the Hex package**
   ([issue #42](https://github.com/jvoegele/external_service/issues/42)). The
   README links into the guides eight times, and hex.pm renders the README out of
