@@ -28,30 +28,36 @@ use ExternalService,
 | ---------------- | -------- | ----------------------------------------------------------------------- |
 | `:limit`         | yes      | Maximum number of calls in flight against the service at once.          |
 | `:reclaim_after` | yes      | Milliseconds after which a held slot is assumed abandoned and reused.   |
+| `:wait`          | no       | Milliseconds a call may wait for a slot. Defaults to `false` — shed at once. |
 
 Concurrency limiting is **opt-in**: omit `:concurrency` and calls are never
 capped.
 
-## It sheds load, it does not smooth it
+## What happens over the limit
 
-Over the limit, a call fails immediately with `ExternalService.ServiceSaturated`.
-It does not queue — queueing is what the rate limiter's `:wait` budget is for,
-and a queue of waiting processes is the pile-up this exists to prevent.
-
-That makes the limit sharp, and worth sizing deliberately. With 400 callers
-arriving at once against `limit: 8`, eight are admitted and the rest are shed
-immediately:
+Nothing is dropped. A call over the limit returns
+`ExternalService.ServiceSaturated` to its caller — the library declines to
+*start* the call and hands control straight back. What happens next is yours to
+decide:
 
 ```elixir
 case MyApp.Api.fetch(id) do
-  {:error, %ExternalService.ServiceSaturated{context: %{limit: limit}}} ->
-    # We are at capacity for this dependency. Shed, don't wait.
-    {:error, :busy}
+  {:error, %ExternalService.ServiceSaturated{}} ->
+    # Any of these is a legitimate answer. The request is still yours.
+    MyApp.Queue.enqueue(:fetch, id)          # do it later
+    # or: MyApp.Cache.stale(id)              # serve something older
+    # or: {:error, :busy}                    # 503 with a Retry-After
+    # or: retry at your own layer            # the next call may well succeed
 
   result ->
     result
 end
 ```
+
+**There is no cooldown.** Unlike the circuit breaker, which stays open for
+`:reset` once tripped, a concurrency limit has no lockout at all: the moment a
+call finishes, its slot is free and the next caller takes it. Recovery is not
+something you have to arrange — it is continuous.
 
 `ServiceSaturated` reports `http_status/1` of `503`. That differs from
 `ExternalService.RateLimited`'s `429` on purpose: a rate limit is the external
@@ -60,8 +66,61 @@ service refusing you, while saturation is *your own* bulkhead shedding load — 
 theirs.
 
 Because the wrapped function never ran, saturation does **not** melt the circuit
-breaker and is **not** retried, exactly like rate limiting. Retrying immediately
-would only find the bulkhead full again.
+breaker and is **not** retried inside the call, exactly like rate limiting.
+
+### It only fires above capacity
+
+Shedding is proportional to overload, not a cliff. Measured with `limit: 8` and
+20ms calls — a capacity of roughly 400 calls per second:
+
+| Offered load             | Shed  |
+| ------------------------ | ----- |
+| 25% of capacity          | 0%    |
+| 50% of capacity          | 0%    |
+| at capacity              | 12%   |
+| 2× capacity              | 54%   |
+
+Below capacity the limit never fires. Above it, the calls being shed are ones
+that could not have been served anyway — and the point is what happens to the
+rest. Without a limit those callers do not disappear; they park in your
+application, each holding a connection, degrading the calls that *could* have
+succeeded and every other endpoint sharing the node. Shedding protects the work
+you can actually do.
+
+## Absorbing bursts with `:wait`
+
+By default a call over the limit is shed immediately. That is the right default,
+but it is strict: a burst that would have cleared in 30ms is shed anyway.
+
+A **bounded** wait budget absorbs that:
+
+```elixir
+concurrency: [
+  limit: 25,
+  reclaim_after: :timer.seconds(30),
+  wait: 50                            # wait up to 50ms for a slot
+]
+```
+
+A waiting caller holds **no slot** and no connection — it is parked, and the
+number parked is bounded by arrival rate × budget, so this smooths bursts without
+reintroducing the pile-up the limit exists to prevent. If the budget runs out,
+you get `ServiceSaturated` exactly as before.
+
+| `:wait` value | Behavior                                                     |
+| ------------- | ------------------------------------------------------------ |
+| `false`       | Shed immediately. **The default.**                           |
+| milliseconds  | Wait up to this long for a slot, then shed.                  |
+
+Start small. A budget in the tens of milliseconds absorbs jitter; one in the
+hundreds starts adding real latency to the requests you are trying to protect.
+
+> #### `:infinity` is not accepted here {: .warning}
+>
+> The rate limiter's `:wait` accepts `:infinity`, because sleeping until a quota
+> refills is bounded by the quota itself. A slot only frees when another call
+> finishes, so nothing bounds waiting for one — an unbounded wait *is* the
+> unbounded pile-up. `start/2` raises rather than accepting it.
 
 ## Choosing a limit
 

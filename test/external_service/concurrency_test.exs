@@ -354,7 +354,153 @@ defmodule ExternalService.ConcurrencyTest do
     end
   end
 
+  describe "waiting for a slot" do
+    test "a burst that clears within the budget is served, not shed", %{service: service} do
+      start(service,
+        concurrency: [limit: 1, reclaim_after: :timer.seconds(30), wait: 500]
+      )
+
+      test_process = self()
+
+      holder =
+        Task.async(fn ->
+          ExternalService.call(service, fn ->
+            send(test_process, :in_call)
+
+            receive do
+              :release -> :done
+            after
+              5_000 -> :timeout
+            end
+          end)
+        end)
+
+      assert_receive :in_call, 2_000
+
+      waiter = Task.async(fn -> ExternalService.call(service, fn -> :served end) end)
+
+      # The slot is busy, so the waiter is parked rather than shed.
+      Process.sleep(50)
+      refute Task.yield(waiter, 0)
+
+      send(holder.pid, :release)
+      assert Task.await(holder) == :done
+
+      # It picks up the freed slot instead of returning ServiceSaturated.
+      assert Task.await(waiter, 2_000) == :served
+    end
+
+    test "the budget is bounded: it sheds once exhausted", %{service: service} do
+      start(service, concurrency: [limit: 1, reclaim_after: :timer.seconds(30), wait: 50])
+
+      tasks = saturate(service, 1)
+      held = await_in_call(1)
+
+      {elapsed, result} =
+        :timer.tc(fn -> ExternalService.call(service, fn -> flunk("should not run") end) end)
+
+      assert {:error, %ServiceSaturated{}} = result
+      # Waited roughly the budget, then gave up rather than parking forever.
+      assert elapsed >= 40_000
+      assert elapsed < 2_000_000
+
+      Enum.each(held, &send(&1, :release))
+      Task.await_many(tasks)
+    end
+
+    test "a waiting caller holds no slot", %{service: service} do
+      start(service, concurrency: [limit: 2, reclaim_after: :timer.seconds(30), wait: 300])
+
+      tasks = saturate(service, 2)
+      held = await_in_call(2)
+
+      # Two slots are held by the calls in flight. A third caller waiting for one
+      # must not itself be counted as in flight.
+      waiter = Task.async(fn -> ExternalService.call(service, fn -> :served end) end)
+      Process.sleep(50)
+
+      assert Concurrency.in_flight(service) == 2
+
+      Enum.each(held, &send(&1, :release))
+      Task.await_many(tasks)
+      assert Task.await(waiter, 2_000) == :served
+    end
+
+    test "waiting emits [:external_service, :concurrency, :waited]", %{service: service} do
+      start(service, concurrency: [limit: 1, reclaim_after: :timer.seconds(30), wait: 500])
+
+      test_process = self()
+      handler_id = "waited-#{inspect(service)}"
+
+      :telemetry.attach(
+        handler_id,
+        [:external_service, :concurrency, :waited],
+        fn _event, measurements, metadata, _config ->
+          send(test_process, {:waited, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      holder =
+        Task.async(fn ->
+          ExternalService.call(service, fn ->
+            send(test_process, :in_call)
+
+            receive do
+              :release -> :done
+            after
+              5_000 -> :timeout
+            end
+          end)
+        end)
+
+      assert_receive :in_call, 2_000
+      waiter = Task.async(fn -> ExternalService.call(service, fn -> :served end) end)
+      Process.sleep(30)
+      send(holder.pid, :release)
+
+      assert Task.await(holder) == :done
+      assert Task.await(waiter, 2_000) == :served
+
+      assert_receive {:waited, %{wait_time: wait_time}, %{service: ^service}}, 2_000
+      assert wait_time > 0
+    end
+
+    test "a call served without waiting emits nothing", %{service: service} do
+      start(service, concurrency: [limit: 1, reclaim_after: :timer.seconds(30), wait: 500])
+
+      test_process = self()
+      handler_id = "no-wait-#{inspect(service)}"
+
+      :telemetry.attach(
+        handler_id,
+        [:external_service, :concurrency, :waited],
+        fn _event, m, meta, _config -> send(test_process, {:waited, m, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      assert ExternalService.call(service, fn -> :ok end) == :ok
+      refute_receive {:waited, _, _}, 100
+    end
+  end
+
   describe "configuration" do
+    test "wait: :infinity is rejected with an explanation", %{service: service} do
+      message =
+        assert_raise ArgumentError, fn ->
+          ExternalService.start(service,
+            concurrency: [limit: 1, reclaim_after: 1_000, wait: :infinity],
+            retry: [max_attempts: 1]
+          )
+        end
+
+      assert Exception.message(message) =~ "unbounded pile-up"
+    end
+
     test "reclaim_after is required", %{service: service} do
       assert_raise NimbleOptions.ValidationError, ~r/required.*:reclaim_after/, fn ->
         ExternalService.start(service, concurrency: [limit: 5], retry: [max_attempts: 1])

@@ -202,11 +202,14 @@ ExternalService.RateLimiter.request(:api)
 ```elixir
 concurrency: [
   limit: 25,                        # calls in flight at once
-  reclaim_after: :timer.seconds(30) # slot expiry; must exceed
-]                                   # your client timeout
+  reclaim_after: :timer.seconds(30),# slot expiry; must exceed
+                                    # your client timeout
+  wait: 50                          # ms | false (default)
+]
 ```
 
-Over the limit, calls fail fast — they do not queue.
+Over the limit, calls shed rather than queue. A short
+`:wait` absorbs bursts; `:infinity` is rejected.
 
 ### Errors & introspection
 
@@ -301,6 +304,7 @@ rescue
 [:external_service, :circuit_breaker, :blown]
 [:external_service, :rate_limit, :sleep]
 [:external_service, :concurrency, :rejected]
+[:external_service, :concurrency, :waited]
 ```
 
 ### Attach

@@ -42,11 +42,27 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   wedged; `:reclaim_after` bounds the damage to one slot for one window. It is
   required rather than defaulted because it must exceed the longest legitimate
   call, which depends on a client timeout the library cannot see.
+- **An optional `:wait` budget on `:concurrency`** absorbs short bursts instead of
+  shedding them. `concurrency: [limit: 25, reclaim_after: 30_000, wait: 50]` parks
+  a caller for up to 50ms waiting for a slot before returning `ServiceSaturated`.
+  Waiting callers hold no slot and no connection, so the number parked is bounded
+  by arrival rate times the budget — smoothing without reintroducing the pile-up a
+  concurrency limit exists to prevent. Defaults to `false` (shed immediately).
+
+  Unlike the rate limiter's `:wait`, `:infinity` is **not** accepted: sleeping
+  until a quota refills is bounded by the quota, but a slot only frees when
+  another call finishes, so an unbounded wait is the pile-up itself. `start/2`
+  raises with an explanation rather than a bare type error, since anyone reaching
+  for it is coming from the rate limiter where `:infinity` is often correct.
 - **`ExternalService.saturated?/1`** (with a generated `saturated?/0`), plus
   `ExternalService.Concurrency.in_flight/1` and `limit/1`, completing the trio
   with `available?/1` and `rate_limited?/1`. `reset_all/1` frees every slot.
-- **`[:external_service, :concurrency, :rejected]` telemetry**, and a new
-  [Concurrency Limiting](concurrency.md) guide.
+- **`[:external_service, :concurrency, :rejected]` and
+  `[:external_service, :concurrency, :waited]` telemetry**, and a new
+  [Concurrency Limiting](concurrency.md) guide. The guide documents what a
+  rejection actually means — the call is handed back to its caller, not dropped —
+  that there is no cooldown, and the measured shed rate against offered load
+  (0% below capacity, 12% at capacity, 54% at twice capacity).
 
 ### Changed
 - **Documented that `ExternalService` imposes no timeout**

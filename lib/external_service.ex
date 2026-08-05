@@ -190,6 +190,17 @@ defmodule ExternalService do
           "Required rather than defaulted: it must exceed the longest legitimate call, " <>
           "which depends on the timeout configured in your HTTP client. Setting it too " <>
           "low silently admits more than `:limit`."
+    ],
+    wait: [
+      type: {:or, [{:in, [false]}, :non_neg_integer]},
+      default: false,
+      doc:
+        "How long a call may wait for a slot before being shed. `false` (the default) " <>
+          "sheds immediately; an integer is a millisecond budget. A short budget absorbs " <>
+          "bursts without allowing a pile-up, since waiting callers hold no slot and are " <>
+          "bounded by arrival rate times the budget. Unlike the rate limiter's `:wait`, " <>
+          "`:infinity` is not accepted — an unbounded wait is the pile-up a concurrency " <>
+          "limit exists to prevent."
     ]
   ]
 
@@ -287,7 +298,7 @@ defmodule ExternalService do
   """
   @spec start(service(), options()) :: :ok
   def start(service, options \\ []) do
-    options = NimbleOptions.validate!(options, @start_schema)
+    options = validate!(service, options)
     validate_breaker_combination!(service, options[:circuit_breaker])
 
     circuit_breaker = CircuitBreaker.install(service, options[:circuit_breaker])
@@ -301,13 +312,48 @@ defmodule ExternalService do
 
     warn_unbounded_wait(service, rate_limit, options[:rate_limit])
 
-    concurrency = Concurrency.new(service, options[:concurrency])
+    concurrency =
+      Concurrency.new(
+        service,
+        options[:concurrency],
+        Keyword.take(options, [:sleep_function])
+      )
 
     retry_options = RetryOptions.new(options[:retry])
     warn_unbounded_retries(service, retry_options)
 
     State.init(service, circuit_breaker, rate_limit, concurrency, retry_options)
     :ok
+  end
+
+  # NimbleOptions would reject `concurrency: [wait: :infinity]` with a type error
+  # that does not explain itself. Anyone reaching for it is coming from the rate
+  # limiter's `:wait`, where `:infinity` is both accepted and often correct, so
+  # the difference is worth spelling out.
+  defp validate!(service, options) do
+    if get_in(options, [:concurrency, :wait]) == :infinity do
+      raise ArgumentError, """
+      ExternalService.start(#{inspect(service)}, ...) sets \
+      concurrency: [wait: :infinity], which is not allowed. Waiting forever for a \
+      slot is the unbounded pile-up a concurrency limit exists to prevent — every \
+      caller over the limit would park indefinitely, which is the behavior you get \
+      by not configuring `:concurrency` at all.
+
+      Use a bounded budget to absorb bursts:
+
+          concurrency: [limit: 25, reclaim_after: 30_000, wait: 50]
+
+      Or shed immediately, which is the default:
+
+          concurrency: [limit: 25, reclaim_after: 30_000]
+
+      The rate limiter's `:wait` does accept `:infinity`, because sleeping until a \
+      quota refills is bounded by the quota itself. A slot only frees when another \
+      call finishes, so nothing bounds it here.
+      """
+    end
+
+    NimbleOptions.validate!(options, @start_schema)
   end
 
   # `:fault_injection` exists to make a breaker report blown; `tolerate: :infinity`

@@ -10,13 +10,22 @@ defmodule ExternalService.Concurrency do
   call leaves roughly a thousand processes parked in the same call, each holding
   a connection out of the pool.
 
-  A concurrency limit caps that. Over the limit, calls fail immediately with
-  `ExternalService.ServiceSaturated` rather than queueing — queueing is what the
-  rate limiter's `:wait` budget is for, and a queue is the pile-up this exists to
-  prevent.
+  A concurrency limit caps that.
 
       use ExternalService,
         concurrency: [limit: 25, reclaim_after: :timer.seconds(30)]
+
+  Over the limit a call is not dropped — it returns
+  `ExternalService.ServiceSaturated` to its caller, which is then free to enqueue
+  the work, serve something stale, or answer 503. There is no cooldown: unlike the
+  circuit breaker, a slot is available again the instant the call holding it
+  finishes, so recovery is continuous rather than something you arrange.
+
+  An optional `:wait` budget absorbs short bursts by parking a caller for a
+  bounded time before shedding. Waiting callers hold no slot, so the number parked
+  is bounded by arrival rate times the budget. `:infinity` is deliberately not
+  accepted — an unbounded wait is the pile-up a concurrency limit exists to
+  prevent.
 
   Saturation is **your** backpressure rather than the service's failure, so it
   does not melt the circuit breaker and is not retried, exactly like
@@ -71,7 +80,21 @@ defmodule ExternalService.Concurrency do
   """
   @type saturated :: {__MODULE__, :saturated}
 
-  defstruct [:service, :slots, :limit, :reclaim_after]
+  @typedoc """
+  How long a call may wait for a slot before being shed.
+
+  `false` (the default) sheds immediately. An integer is a millisecond budget.
+  `:infinity` is deliberately not accepted: an unbounded wait is the pile-up a
+  concurrency limit exists to prevent.
+  """
+  @type wait :: false | non_neg_integer()
+
+  defstruct [:service, :slots, :limit, :reclaim_after, :sleep, wait: false]
+
+  # How long a waiting caller pauses between scans. There is no notification when
+  # a slot frees -- that would need a process -- so waiting polls. Kept small so
+  # a freed slot is picked up promptly, and bounded overall by the `:wait` budget.
+  @poll_interval 1
 
   @doc """
   Reports how many of `service`'s slots are currently held.
@@ -131,10 +154,12 @@ defmodule ExternalService.Concurrency do
   # part of the public API.
 
   @doc false
-  @spec new(service(), keyword() | nil) :: t()
-  def new(_service, nil), do: nil
+  @spec new(service(), keyword() | nil, keyword()) :: t()
+  def new(service, options, opts \\ [])
 
-  def new(service, options) when is_list(options) do
+  def new(_service, nil, _opts), do: nil
+
+  def new(service, options, opts) when is_list(options) do
     limit = Keyword.fetch!(options, :limit)
     slots = :atomics.new(limit, signed: true)
 
@@ -142,7 +167,9 @@ defmodule ExternalService.Concurrency do
       service: service,
       slots: slots,
       limit: limit,
-      reclaim_after: Keyword.fetch!(options, :reclaim_after)
+      reclaim_after: Keyword.fetch!(options, :reclaim_after),
+      wait: Keyword.get(options, :wait, false),
+      sleep: Keyword.get(opts, :sleep_function, &Process.sleep/1)
     }
 
     free_all(concurrency)
@@ -154,8 +181,12 @@ defmodule ExternalService.Concurrency do
   def call(nil, function) when is_function(function, 0), do: function.()
 
   def call(%__MODULE__{} = concurrency, function) when is_function(function, 0) do
-    case acquire(concurrency) do
+    started = now()
+
+    case acquire_within(concurrency, wait_deadline(concurrency.wait, started)) do
       {:ok, slot, deadline} ->
+        emit_waited(concurrency, now() - started)
+
         try do
           function.()
         after
@@ -163,8 +194,31 @@ defmodule ExternalService.Concurrency do
         end
 
       :saturated ->
-        emit_rejected(concurrency)
+        emit_rejected(concurrency, now() - started)
         {__MODULE__, :saturated}
+    end
+  end
+
+  # `false` sheds on the first failed scan; a budget polls until it runs out.
+  defp wait_deadline(false, _started), do: :none
+  defp wait_deadline(milliseconds, started), do: started + milliseconds
+
+  defp acquire_within(concurrency, :none), do: acquire(concurrency)
+
+  defp acquire_within(concurrency, deadline) do
+    case acquire(concurrency) do
+      {:ok, _slot, _held_until} = acquired ->
+        acquired
+
+      :saturated ->
+        remaining = deadline - now()
+
+        if remaining <= 0 do
+          :saturated
+        else
+          concurrency.sleep.(min(@poll_interval, remaining))
+          acquire_within(concurrency, deadline)
+        end
     end
   end
 
@@ -218,10 +272,22 @@ defmodule ExternalService.Concurrency do
 
   defp now, do: System.monotonic_time(:millisecond)
 
-  defp emit_rejected(%__MODULE__{service: service, limit: limit}) do
+  defp emit_rejected(%__MODULE__{service: service, limit: limit}, waited) do
     :telemetry.execute(
       [:external_service, :concurrency, :rejected],
-      %{limit: limit},
+      %{limit: limit, wait_time: waited},
+      %{service: service}
+    )
+  end
+
+  # Only calls that actually had to wait are reported, so a service running under
+  # its limit emits nothing.
+  defp emit_waited(_concurrency, 0), do: :ok
+
+  defp emit_waited(%__MODULE__{service: service, limit: limit}, waited) do
+    :telemetry.execute(
+      [:external_service, :concurrency, :waited],
+      %{limit: limit, wait_time: waited},
       %{service: service}
     )
   end
