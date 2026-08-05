@@ -130,8 +130,12 @@ defmodule ExternalService.RateLimiter do
 
   `:infinity` waits as long as the limiter requires, `false` never waits, and an
   integer is a millisecond budget for the whole call.
+
+  `nil` means the service never set `:wait`. It behaves exactly like `:infinity`,
+  but `ExternalService.start/2` warns about it — see
+  [Bounding the wait](rate-limiting.html#bounding-the-wait).
   """
-  @type wait :: :infinity | false | non_neg_integer()
+  @type wait :: :infinity | false | non_neg_integer() | nil
 
   @typedoc """
   Returned by `call/2` when the wait budget was exhausted before the call could
@@ -139,7 +143,7 @@ defmodule ExternalService.RateLimiter do
   """
   @type rate_limited :: {__MODULE__, :rate_limited, non_neg_integer()}
 
-  defstruct [:service, :backend, :config, :sleep, wait: :infinity]
+  defstruct [:service, :backend, :config, :sleep, :wait]
 
   @doc """
   Reports whether a call to `service` would be admitted right now, without
@@ -209,8 +213,10 @@ defmodule ExternalService.RateLimiter do
 
   def new(service, options, opts) when is_list(options) do
     # `:wait` governs the runtime rather than the backend, so it is taken out
-    # before the remaining options are handed over.
-    {wait, options} = Keyword.pop(options, :wait, :infinity)
+    # before the remaining options are handed over. It has no schema default, so
+    # an absent key arrives here as `nil` — "never set", which waits like
+    # `:infinity` but warns.
+    {wait, options} = Keyword.pop(options, :wait)
     {module, options} = split_backend(options)
     {:ok, config} = module.init(service, options)
 
@@ -249,7 +255,10 @@ defmodule ExternalService.RateLimiter do
 
   # The budget covers the whole call rather than any single sleep, so it is
   # resolved once into a monotonic deadline and then compared against.
-  defp deadline(:infinity), do: :infinity
+  #
+  # `nil` (never set) and `:infinity` (explicitly unbounded) behave identically;
+  # they are distinguished only so that `start/2` can warn about the former.
+  defp deadline(unbounded) when unbounded in [nil, :infinity], do: :infinity
   defp deadline(false), do: :none
   defp deadline(milliseconds), do: System.monotonic_time(:millisecond) + milliseconds
 

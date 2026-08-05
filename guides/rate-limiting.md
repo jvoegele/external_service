@@ -25,7 +25,7 @@ use ExternalService,
 | ---------- | -------- | ------------------------------------------------------------------------ |
 | `:limit`   | yes      | Maximum number of calls allowed within each `:per` window.               |
 | `:per`     | yes      | Length of the rate-limiting window, in milliseconds.                     |
-| `:wait`    | no       | How long a throttled call may wait. Defaults to `:infinity`.             |
+| `:wait`    | no       | How long a throttled call may wait. Unset waits indefinitely, and warns. |
 | `:backend` | no       | The limiter implementation. Defaults to `ExternalService.RateLimiter.Local`. |
 
 `:limit` and `:per` are both required when `:rate_limit` is present.
@@ -75,12 +75,11 @@ ids
 
 ## Bounding the wait
 
-By default a throttled call waits as long as the limiter requires — there is no
-upper bound. If callers produce work faster than the limit allows, the backlog
-grows and individual calls can block for a long time. Rate limiting paces calls;
-by itself it does not shed load.
+A throttled call sleeps the **calling process** until the limiter admits it. With
+no `:wait` budget there is nothing to stop that. Rate limiting paces calls; by
+itself it does not shed load.
 
-On latency- or demand-sensitive paths, give the wait a budget with `:wait`:
+Give the wait a budget with `:wait`:
 
 ```elixir
 use ExternalService,
@@ -93,9 +92,50 @@ use ExternalService,
 
 | `:wait` value  | Behavior                                                          |
 | -------------- | ----------------------------------------------------------------- |
-| `:infinity`    | Wait as long as it takes. **The default.**                        |
+| `:infinity`    | Wait as long as it takes.                                         |
 | milliseconds   | A budget for the whole call, not for any single sleep.            |
 | `false`        | Never wait — fail immediately if the call cannot be made now.     |
+
+> #### Don't expect the limiter to bound the wait for you {: .warning}
+>
+> The limiter never quotes a long delay. A single check reports at most **one
+> emission interval** (`:per / :limit`, so 10ms at `limit: 100, per: 1_000`), no
+> matter how saturated the bucket is — so an unbounded wait is not the same thing
+> as a well-paced one.
+>
+> Long waits come out of the re-check loop, and that loop is **unfair**: there is
+> no queue, so a sleeping caller can lose the race to a newly arrived one over
+> and over. With the default local limiter at `limit: 50, per: 1_000`, one caller
+> competing against a herd of 25 blocked for **1.7s, 4.4s and 5.2s** on three
+> consecutive runs of the same scenario.
+>
+> The wait a given call experiences is therefore set by how much other traffic
+> there is, not by the configuration — which is exactly what you cannot predict
+> at the call site.
+
+Which value you want depends on where the call is made, not on the service:
+
+- **Background work** — a job runner, a `Flow` pipeline, a batch import:
+  `:infinity`. Sleeping *is* the back-pressure, and it propagates upstream (see
+  the [Flow](flow.md) guide).
+- **A request path** — anything with a client waiting on the other end: a finite
+  budget. The client has usually given up long before a deep backlog clears, so
+  the work is being done for nobody.
+
+A window's worth — the same number you gave `:per` — is a good starting point for
+a request path. It absorbs bursts and sheds sustained overload; measured at
+`limit: 50, per: 1_000` with `wait: 1_000`:
+
+| Offered load                    | Calls shed |
+| ------------------------------- | ---------- |
+| 1× (50 calls over 1s)           | 0%         |
+| 2× instantaneous burst          | 1%         |
+| 2× sustained (200 calls over 2s)| 9%         |
+| 6× sustained (300 calls over 1s)| 50%        |
+
+`wait: false` is the aggressive end of the same dial: it sheds **50% of that same
+2× burst**, because it will not wait even the 20ms the limiter is asking for.
+Reach for it when you would rather shed than add any latency at all.
 
 When the budget runs out the wrapped function is **not called** and you get an
 `ExternalService.RateLimited` error:
@@ -119,6 +159,28 @@ throttled again. See the [Error Handling](error-handling.md) guide.
 The alternative to a budget is to absorb the wait elsewhere: run the work through
 `call_async_stream/2` so a pool of tasks does the sleeping, or apply your own
 back-pressure upstream.
+
+### An unbounded wait is a choice, not a default to fall into
+
+Because which of these you want depends on the call site, `ExternalService.start/2`
+logs a warning when a rate-limited service sets no `:wait` at all:
+
+```
+[warning] ExternalService.start(:my_service, ...) sets no rate limit wait budget:
+:wait is unset, so a throttled call sleeps the calling process for as long as the
+limiter requires. ...
+```
+
+It fires only for services that configure `:rate_limit` — a service with no rate
+limiting has nothing to wait for and never warns.
+
+If an unbounded wait really is what you want, set `:wait` to `:infinity` to say
+so. It behaves exactly like leaving `:wait` unset and silences the warning:
+
+```elixir
+use ExternalService,
+  rate_limit: [limit: 100, per: :timer.seconds(1), wait: :infinity]
+```
 
 ## Asking before you commit
 

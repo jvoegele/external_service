@@ -40,9 +40,10 @@ into an HTTP response or a structured log entry. `ServiceNotStarted` maps to
 `500` (it signals a configuration/programming mistake, not a transient outage)
 and `RateLimited` to `429`; the other two map to `503`.
 
-`RateLimited` only appears for services configured with `rate_limit: [wait: ...]`
-— by default a throttled call waits as long as it takes rather than failing. See
-the [Rate limiting](rate-limiting.md) guide.
+`RateLimited` only appears for services that bound the wait with `wait: false` or
+a millisecond budget — with `wait: :infinity`, or with `:wait` left unset, a
+throttled call waits as long as it takes rather than failing. See the
+[Rate limiting](rate-limiting.md) guide.
 
 ## `call` — errors as values
 

@@ -181,3 +181,29 @@ MyApp.Stripe.reset()
   bounds are unset, and `:infinity` is accepted as an explicit, forward-compatible
   way to keep unbounded behavior. 3.0 changes the default and the warning goes
   away.
+
+- **Give the rate limit `:wait` a finite default** (#47). An unset `:wait` sleeps
+  the calling process until the limiter admits it. That is right for background
+  work and wrong in a request path, where it turns load into latency and process
+  growth instead of a fast 429 — and `ExternalService.RateLimited` already carries
+  `retry_after` and maps to 429, but the default configuration can never produce
+  it.
+
+  The wait is also not as predictable as it looks. A single backend check never
+  reports more than one emission interval (`:per / :limit`), so long waits come
+  from the re-check loop, which has no queue and is unfair: measured at
+  `limit: 50, per: 1_000`, one caller against a herd of 25 blocked for 1.7s, 4.4s
+  and 5.2s across three runs of the same scenario.
+
+  **The 3.0 default should be a finite budget derived from `:per`, not `false`.**
+  Measured at `limit: 50, per: 1_000`, a one-window (1000ms) budget sheds 0% at
+  1× offered load, 1% of a 2× instantaneous burst, 9% of a 2× sustained load and
+  50% under 6× sustained — it absorbs bursts and sheds only real overload.
+  `wait: false` sheds 50% of that same 2× burst, which would make bursty-but-
+  healthy traffic look like an outage. One window is the value to beat; the exact
+  multiple is worth re-measuring against the Hammer backend before committing.
+
+  Groundwork is in place as of the unreleased 2.x: `:wait` has no schema default,
+  so an unset value is distinguishable from an explicit `:infinity`; `start/2`
+  warns about the former, and `:infinity` is the forward-compatible way to keep
+  waiting indefinitely.

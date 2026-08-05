@@ -142,13 +142,14 @@ defmodule ExternalService do
     ],
     wait: [
       type: {:or, [{:in, [:infinity, false]}, :non_neg_integer]},
-      default: :infinity,
       doc:
         "How long a throttled call may wait for the rate limit to admit it. " <>
-          "`:infinity` (the default) waits as long as it takes, `false` never waits, and " <>
-          "an integer is a millisecond budget for the whole call. When the budget runs " <>
-          "out the call is not made and an `ExternalService.RateLimited` error is " <>
-          "returned (or raised by `call!/3`)."
+          "`:infinity` waits as long as it takes, `false` never waits, and an integer " <>
+          "is a millisecond budget for the whole call. When the budget runs out the " <>
+          "call is not made and an `ExternalService.RateLimited` error is returned " <>
+          "(or raised by `call!/3`). Leaving this unset waits like `:infinity` but " <>
+          "logs a warning at `start/2`, because an unbounded wait converts sustained " <>
+          "throttling into unbounded latency rather than shed load."
     ],
     backend: [
       type: {:or, [:atom, {:tuple, [:atom, :keyword_list]}]},
@@ -256,6 +257,8 @@ defmodule ExternalService do
         Keyword.take(options, [:sleep_function])
       )
 
+    warn_unbounded_wait(service, rate_limit, options[:rate_limit])
+
     retry_options = RetryOptions.new(options[:retry])
     warn_unbounded_retries(service, retry_options)
 
@@ -291,6 +294,47 @@ defmodule ExternalService do
   end
 
   defp warn_unbounded_retries(_service, _retry_options), do: :ok
+
+  # A throttled call sleeps the *calling* process until the limiter admits it,
+  # and with no `:wait` budget there is nothing to stop that. The limiter itself
+  # never quotes a long delay — a single check reports at most one emission
+  # interval — so the exposure is not one long sleep but an unfair re-check loop:
+  # under contention a caller can lose the race repeatedly while others are
+  # admitted. Measured against a default local limiter at `limit: 50, per: 1_000`,
+  # one caller competing with a herd of 25 blocked for 1.7s, 4.4s and 5.2s on
+  # three consecutive runs. That is the right behavior for background work, where
+  # sleeping is back-pressure, and the wrong behavior in a request path, where it
+  # converts load into latency and process growth instead of a fast 429.
+  #
+  # As with the retry bounds, `:infinity` is the acknowledgement: same behavior,
+  # stated deliberately, so it does not warn.
+  defp warn_unbounded_wait(service, %RateLimiter{wait: nil}, rate_limit_options) do
+    per = rate_limit_options[:per]
+
+    Logger.warning("""
+    ExternalService.start(#{inspect(service)}, ...) sets no rate limit wait budget: \
+    :wait is unset, so a throttled call sleeps the calling process for as long as \
+    the limiter requires. Under sustained throttling that converts load into \
+    latency rather than shedding it, and a caller can be passed over repeatedly \
+    while others are admitted.
+
+    Give the wait a budget:
+
+        ExternalService.start(#{inspect(service)}, rate_limit: [..., wait: #{inspect(per)}])
+
+    A call that exhausts its budget returns ExternalService.RateLimited, which \
+    reports http_status/1 of 429. Use `wait: false` to shed immediately instead.
+
+    If an unbounded wait is intended — background work, or a Flow pipeline where \
+    sleeping is the back-pressure — say so explicitly to silence this warning:
+
+        ExternalService.start(#{inspect(service)}, rate_limit: [..., wait: :infinity])
+
+    See https://hexdocs.pm/external_service/rate-limiting.html#bounding-the-wait\
+    """)
+  end
+
+  defp warn_unbounded_wait(_service, _rate_limit, _options), do: :ok
 
   @doc """
   Stops the fuse for a specific service.
@@ -773,7 +817,7 @@ defmodule ExternalService do
       defmodule MyApp.Stripe do
         use ExternalService,
           circuit_breaker: [tolerate: 5, within: :timer.seconds(1), reset: :timer.seconds(5)],
-          rate_limit: [limit: 100, per: :timer.seconds(1)],
+          rate_limit: [limit: 100, per: :timer.seconds(1), wait: :timer.seconds(1)],
           retry: [max_attempts: 5, backoff: :exponential, jitter: true]
 
         def charge(params) do

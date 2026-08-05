@@ -87,6 +87,55 @@ defmodule ExternalServiceTest do
 
       assert log =~ "sets no retry bound"
     end
+
+    test "warns when a rate limited service sets no wait budget" do
+      log =
+        capture_log(fn ->
+          start_fuse(:"unbounded-wait-warning",
+            retry: [max_attempts: 5],
+            rate_limit: [limit: 10, per: 1_000]
+          )
+        end)
+
+      assert log =~ "sets no rate limit wait budget"
+      assert log =~ "wait: :infinity"
+    end
+
+    test "the suggested budget is the service's own :per" do
+      log =
+        capture_log(fn ->
+          start_fuse(:"unbounded-wait-per",
+            retry: [max_attempts: 5],
+            rate_limit: [limit: 10, per: 30_000]
+          )
+        end)
+
+      assert log =~ "wait: 30000"
+    end
+
+    for {label, wait} <- [
+          {"an explicit :infinity", :infinity},
+          {"false", false},
+          {"a millisecond budget", 2_000}
+        ] do
+      test "does not warn when :wait is #{label}" do
+        log =
+          capture_log(fn ->
+            start_fuse(:"bounded-wait-#{unquote(label)}",
+              retry: [max_attempts: 5],
+              rate_limit: [limit: 10, per: 1_000, wait: unquote(Macro.escape(wait))]
+            )
+          end)
+
+        refute log =~ "sets no rate limit wait budget"
+      end
+    end
+
+    test "does not warn for a service with no rate limit at all" do
+      log = capture_log(fn -> start_fuse(:"no-rate-limit", retry: [max_attempts: 5]) end)
+
+      refute log =~ "sets no rate limit wait budget"
+    end
   end
 
   describe "stop" do
