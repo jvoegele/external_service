@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-08-05
+
 ### Added
 - **`circuit_breaker: [tolerate: :infinity]` installs no breaker at all**
   ([issue #55](https://github.com/jvoegele/external_service/issues/55)). It never
@@ -430,7 +432,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/2.4.0...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/2.5.0...HEAD
+[2.5.0]: https://github.com/jvoegele/external_service/compare/2.4.0...2.5.0
 [2.4.0]: https://github.com/jvoegele/external_service/compare/2.3.0...2.4.0
 [2.3.0]: https://github.com/jvoegele/external_service/compare/2.2.0...2.3.0
 [2.2.0]: https://github.com/jvoegele/external_service/compare/2.1.0...2.2.0
