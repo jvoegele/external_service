@@ -39,13 +39,13 @@ use ExternalService,
 
 | Option             | Default  | Meaning                                                                                        |
 | ------------------ | -------- | ---------------------------------------------------------------------------------------------- |
-| `:tolerate`        | `10`     | Number of failures tolerated within the `:within` window before the breaker opens.             |
+| `:tolerate`        | `10`     | Number of failed **attempts** tolerated within the `:within` window before the breaker opens.  |
 | `:within`          | `10_000` | Length of the failure-counting window, in milliseconds.                                        |
 | `:reset`           | `60_000` | Milliseconds to wait before the breaker resets (closes) after opening.                         |
 | `:fault_injection` | —        | If set to a rate between `0.0` and `1.0`, randomly fails that fraction of calls (for testing). |
 
 So `tolerate: 5, within: 1_000` means "open the breaker once there are more than
-5 failures inside any 1-second window." After opening, the breaker stays open
+5 failed attempts inside any 1-second window." After opening, the breaker stays open
 for `:reset` milliseconds, then closes again and calls resume under the same
 monitoring.
 
@@ -76,6 +76,38 @@ that fails, where a failure is:
 
 Values your function simply returns — including its own `{:error, reason}` — are
 successes as far as the breaker is concerned and do not melt it.
+
+> #### `:tolerate` counts attempts, not calls {: .warning}
+>
+> The word doing the work above is **attempt**. `:tolerate` reads like "how many
+> failed calls before the breaker opens," but retries melt too: one `call/3` with
+> `max_attempts: 5` that fails throughout contributes 5 melts by itself.
+>
+> So `:tolerate` and `:max_attempts` cannot be tuned independently. Measured with
+> this configuration:
+>
+> ```elixir
+> use ExternalService,
+>   circuit_breaker: [tolerate: 10, within: :timer.seconds(10)],
+>   retry: [max_attempts: 5]
+> ```
+>
+> ```
+> failing call #1: returned RetriesExhausted,   blown? false
+> failing call #2: returned RetriesExhausted,   blown? false
+> failing call #3: returned CircuitBreakerOpen, blown? true
+> ```
+>
+> A breaker that reads as "open after 10 failures" opens during the **third**
+> failing call. (`:fuse` tolerates `:tolerate` melts and opens on the next, so
+> `tolerate: 10` opens on the 11th melt; three calls × 5 attempts = 15 melts,
+> crossing 11 partway through the third.) On a service handling any real
+> concurrency that is a much shorter fuse than the numbers suggest — and the
+> breaker is global, so those calls fail everything else too.
+>
+> Budget in attempts: pick `:tolerate` as roughly *failing calls you'll accept*
+> × `:max_attempts`. The [Retries](retries.md) guide covers the same interaction
+> from the other side — why the breaker is not a reliable bound on retries.
 
 ## When the breaker is open
 

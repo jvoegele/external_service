@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Changed
 - **The `:max_attempts` documentation no longer describes the circuit breaker as
   a bound on retries**, because it isn't one in the general case (see above).
+- **`:tolerate` is now documented as counting failed *attempts*, not failed
+  calls** ([issue #46](https://github.com/jvoegele/external_service/issues/46)).
+  Every failing retry attempt melts the breaker, so `:tolerate` and
+  `:max_attempts` cannot be tuned independently: a `tolerate: 10` breaker paired
+  with `max_attempts: 5` opens during the **third** failing call, not the tenth.
+  The circuit breaker guide now carries the measured numbers and the arithmetic,
+  and the retries guide cross-references it — it is the same coupling seen from
+  the other side.
 - **`:wait` no longer carries a documented default of `:infinity`.** Runtime
   behavior is unchanged — an unset `:wait` still waits as long as the limiter
   requires — but it is now distinguishable from an explicit `:infinity`, which
