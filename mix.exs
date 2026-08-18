@@ -45,8 +45,7 @@ defmodule ExternalService.Mixfile do
   defp deps do
     [
       {:fuse, "~> 2.5"},
-      {:deep_merge, "~> 1.0"},
-      {:decorator, "~> 1.4"},
+      {:decorator, "~> 1.4", optional: true},
       {:errata, "~> 1.5"},
       {:flow, "~> 1.2", optional: true},
       {:nimble_options, "~> 1.1"},

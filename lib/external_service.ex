@@ -1048,6 +1048,43 @@ defmodule ExternalService do
       "ExternalService.start(#{service}) in your application start code."
   end
 
+  @doc false
+  # Deep merges child-spec overrides onto the options given to `use
+  # ExternalService`, for the `start_link/1` the macro below generates.
+  #
+  # This replaces `DeepMerge.deep_merge/2`, and reproduces its rules for the
+  # shapes these options can take:
+  #
+  #   * two keyword-shaped lists merge key by key, recursing into values that are
+  #     themselves keyword-shaped;
+  #   * an **empty** override list leaves a keyword-shaped original alone rather
+  #     than clearing it, so `start_link(circuit_breaker: [])` is a no-op;
+  #   * two plain maps merge the same way, which no option shape currently
+  #     produces but which `DeepMerge` did, so the port keeps it;
+  #   * anything else — a struct, a function, a tuple, a plain list such as
+  #     `:retry_exceptions`, a scalar — is replaced wholesale by the override.
+  #
+  # Note that the second and third rules interact: `retry_exceptions: []` *does*
+  # clear `[RuntimeError]`, because the original is not keyword-shaped and so the
+  # override simply wins. `merge_config_test.exs` pins all of this.
+  #
+  # "Keyword-shaped" is `DeepMerge`'s own test — a list whose head is a two-tuple
+  # — rather than `Keyword.keyword?/1`, which would walk the whole list.
+  @spec __merge_config__(keyword(), keyword()) :: keyword()
+  def __merge_config__(original, override), do: merge_values(original, override)
+
+  defp merge_values([{_, _} | _] = original, [{_, _} | _] = override),
+    do: Keyword.merge(original, override, fn _key, old, new -> merge_values(old, new) end)
+
+  defp merge_values([{_, _} | _] = original, []), do: original
+
+  defp merge_values(original, override)
+       when is_map(original) and is_map(override) and
+              not is_struct(original) and not is_struct(override),
+       do: Map.merge(original, override, fn _key, old, new -> merge_values(old, new) end)
+
+  defp merge_values(_original, override), do: override
+
   @doc """
   Defines a module-based gateway to an external service.
 
@@ -1117,7 +1154,7 @@ defmodule ExternalService do
       `overrides` are deep merged with the options given to `use ExternalService`.
       """
       def start_link(overrides \\ []) do
-        config = DeepMerge.deep_merge(@__external_service_opts__, overrides)
+        config = ExternalService.__merge_config__(@__external_service_opts__, overrides)
 
         Agent.start_link(
           fn -> :ok = ExternalService.start(@__external_service__, config) end,

@@ -8,6 +8,46 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Changed
+- **`:decorator` is now an optional dependency** — a breaking change, and part of
+  the forthcoming 3.0
+  ([issue #48](https://github.com/jvoegele/external_service/issues/48)).
+  `ExternalService.Decorator` — the `@decorate external_call` annotations — is a
+  convenience layer that someone using the front door or the functional API never
+  touches, but compiled anyway. It now gets the same treatment
+  `ExternalService.Flow` has always had: the module is compiled only when its
+  dependency is present, and the dependency is not forced on you.
+
+  **If you use `@decorate external_call`, add it to your deps:**
+
+  ```elixir
+  {:decorator, "~> 1.4"}
+  ```
+
+  Unlike the other 3.0 changes this one is loud rather than silent — a build
+  without it fails immediately and names the missing module:
+
+  ```
+  error: module ExternalService.Decorator is not loaded and could not be found
+  ```
+
+  If you do not use the annotations, there is nothing to do and one fewer
+  transitive dependency in your tree.
+- **Removed the `:deep_merge` dependency.** It was used in exactly one place —
+  combining child-spec overrides with the options given to `use ExternalService` —
+  and is replaced by `ExternalService.__merge_config__/2`, about a dozen lines.
+  This one is internal and changes nothing observable.
+
+  The merge is subtler than "recurse into keyword lists", so it was ported
+  deliberately rather than reinvented. In particular an empty override list means
+  two different things depending on the original: `start_link(circuit_breaker: [])`
+  leaves the configured breaker options alone, while `retry_exceptions: []` *does*
+  clear `[RuntimeError]`, because that original is not keyword-shaped. Both rules
+  are pinned by tests, and the port was checked against `DeepMerge.deep_merge/2`
+  across 24 option shapes before the dependency was dropped.
+
+  Together with `:decorator`, this takes the required runtime dependencies from
+  six to **four** — `fuse`, `errata`, `nimble_options` and `telemetry` — with
+  `decorator` and `flow` optional alongside them.
 - **`:expiry` now honors a budget smaller than 100ms** — a breaking change, and
   part of the forthcoming 3.0
   ([issue #70](https://github.com/jvoegele/external_service/issues/70)).
