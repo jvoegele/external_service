@@ -423,6 +423,75 @@ defmodule ExternalServiceTest do
       assert Process.get(@fuse_name) == @fuse_retries + 1
     end
 
+    test "a retry_exceptions predicate that fails leaves the original exception alone" do
+      for {label, predicate} <- [
+            {"raise", fn _error -> raise "predicate blew up" end},
+            {"throw", fn _error -> throw(:predicate_threw) end},
+            {"exit", fn _error -> exit(:predicate_exited) end}
+          ] do
+        retry_opts = %{@retry_opts | retry_exceptions: predicate}
+        Process.put(@fuse_name, 0)
+
+        # The caller must see the exception the function actually raised — not
+        # whatever the predicate did — with its own stacktrace.
+        {error, stacktrace} =
+          try do
+            ExternalService.call(@fuse_name, retry_opts, fn ->
+              Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+              ExternalServiceTest.Raiser.boom()
+            end)
+
+            flunk("expected the original exception to propagate (#{label})")
+          rescue
+            error -> {error, __STACKTRACE__}
+          end
+
+        assert %RuntimeError{message: "KABOOM!"} = error, label
+        assert {ExternalServiceTest.Raiser, :boom, 0, _location} = hd(stacktrace)
+
+        # A predicate that could not answer means "not retriable", which governs
+        # melting too.
+        assert Process.get(@fuse_name) == 1, label
+        assert ExternalService.available?(@fuse_name), label
+      end
+    end
+
+    test "a failing retry_exceptions predicate logs a warning naming the option and service" do
+      retry_opts = %{@retry_opts | retry_exceptions: fn _error -> raise "predicate blew up" end}
+
+      log =
+        capture_log(fn ->
+          assert_raise(RuntimeError, "KABOOM!", fn ->
+            ExternalService.call(@fuse_name, retry_opts, fn -> raise "KABOOM!" end)
+          end)
+        end)
+
+      assert log =~ ":retry_exceptions predicate for #{inspect(@fuse_name)}"
+      # The predicate's own failure is reported, so it can be found and fixed.
+      assert log =~ "predicate blew up"
+    end
+
+    test "a retry_on predicate that fails leaves a successful result alone" do
+      # Before this was guarded, the predicate's exception escaped as the call's
+      # result — and if `:retry_exceptions` happened to match it, the successful
+      # function was run again for every remaining attempt.
+      retry_opts = %{
+        @retry_opts
+        | retry_on: fn _result -> raise "predicate blew up" end,
+          retry_exceptions: [RuntimeError]
+      }
+
+      result =
+        ExternalService.call(@fuse_name, retry_opts, fn ->
+          Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+          :ok
+        end)
+
+      assert result == :ok
+      assert Process.get(@fuse_name) == 1
+      assert ExternalService.available?(@fuse_name)
+    end
+
     test "calls sleep function when rate limit is reached" do
       service = "sleep test service"
 

@@ -48,7 +48,9 @@ defmodule ExternalService.RetryOptions do
           "itself is used as the retry reason, and the circuit breaker melts). Lets you drive " <>
           "retries from a function that was not written to return `:retry`/`{:retry, reason}`. " <>
           "Defaults to no predicate. An explicit `:retry`/`{:retry, reason}` return always takes " <>
-          "precedence over the predicate."
+          "precedence over the predicate. A predicate that fails — raising, throwing, or " <>
+          "exiting rather than answering — is treated as no match, leaving the result untouched, " <>
+          "and logs a warning."
     ],
     retry_exceptions: [
       type: {:or, [{:list, :atom}, {:fun, 1}]},
@@ -61,7 +63,9 @@ defmodule ExternalService.RetryOptions do
           "`:retry`/`{:retry, reason}` return values, or the `:retry_on` predicate, to drive " <>
           "retries instead. An exception that is not matched also does not melt the circuit " <>
           "breaker, and once retries are spent the original exception is re-raised with its " <>
-          "original stacktrace."
+          "original stacktrace. A predicate that fails — raising, throwing, or exiting rather " <>
+          "than answering — is treated as no match, so the exception it was asked to classify " <>
+          "reaches the caller unchanged, and a warning is logged."
     ]
   ]
 

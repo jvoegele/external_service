@@ -98,6 +98,38 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   (`&MyApp.Retry.retryable_error?/1`) works; the Retries guide now says so too.
 
 ### Fixed
+- **A retry predicate that fails no longer changes the outcome of the call**
+  ([issue #67](https://github.com/jvoegele/external_service/issues/67)).
+  A `:retry_exceptions` predicate runs on a path that is already failing, so a
+  bug in it *replaced* the exception it had been called to classify — the caller
+  got the predicate's error instead of its own, and nothing was retried. The
+  `:retry_on` predicate was worse: because it runs inside the same rescue, its
+  exception was itself evaluated against `:retry_exceptions`, so a matching
+  `:retry_exceptions` would re-run an already-successful function for every
+  remaining attempt.
+
+  A predicate that fails — raising, throwing, or exiting rather than answering —
+  is now treated as **no match**. The call's own result or exception is left
+  exactly as it was, nothing is retried, the circuit breaker is untouched, and a
+  warning naming the option, the service and the predicate's own failure is
+  logged so the bug is findable:
+
+  ```
+  [warning] The :retry_exceptions predicate for :my_service did not return, so the
+  call was treated as not retriable and its own result or exception was left
+  untouched. ...
+
+  ** (RuntimeError) predicate blew up
+      lib/my_app/retry.ex:12: MyApp.Retry.transient?/1
+  ```
+
+  Not retrying is the safe reading: retrying is the consequential interpretation,
+  and a predicate that just crashed has not authorized it.
+
+  This is easy to hit by accident with [Errata](https://hexdocs.pm/errata):
+  `Errata.is_error/1` is a guard macro, so a predicate module that forgets
+  `require Errata` raises, and `Errata.retryable?/1` raises on any value that is
+  not an Errata error.
 - **A retried exception now keeps its original stacktrace.** When retries ran out
   while retrying an exception, it was re-raised with `raise/1`, which generates a
   fresh stacktrace — so the trace handed to the caller pointed into
