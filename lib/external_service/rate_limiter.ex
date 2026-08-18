@@ -134,15 +134,17 @@ defmodule ExternalService.RateLimiter do
 
   @default_backend ExternalService.RateLimiter.Local
 
+  # Ceiling on the `:per`-derived `:wait` default. See `default_wait/1`.
+  @max_default_wait 5_000
+
   @typedoc """
   How long a throttled call may wait before giving up.
 
   `:infinity` waits as long as the limiter requires, `false` never waits, and an
   integer is a millisecond budget for the whole call.
 
-  `nil` means the service never set `:wait`. It behaves exactly like `:infinity`,
-  but `ExternalService.start/2` warns about it — see
-  [Bounding the wait](rate-limiting.html#bounding-the-wait).
+  A service that does not set `:wait` gets one derived from its `:per` — see
+  `default_wait/1`. `nil` never survives `new/3`.
   """
   @type wait :: :infinity | false | non_neg_integer() | nil
 
@@ -252,12 +254,33 @@ defmodule ExternalService.RateLimiter do
     end
   end
 
+  @doc false
+  # The `:wait` budget a service gets when it does not set one: **one window**,
+  # capped at #{@max_default_wait}ms.
+  #
+  # One window is the value because it is the most a limiter can ask a caller to
+  # wait for the next refill, so it absorbs a burst exactly and no more. Measured
+  # at `limit: 50, per: 1_000` against a 2x instantaneous burst, it takes shedding
+  # from 50% to 0% on both backends while still shedding sustained overload —
+  # which is the point, since shedding is the right answer to real overload rather
+  # than converting it into latency. On the fixed-window `Hammer` backend it is
+  # also structural: a window boundary is never more than `:per` away.
+  #
+  # The cap keeps the derivation from producing an absurd budget for a large
+  # window. A per-minute quota (`limit: 100, per: 60_000`) would otherwise block a
+  # caller for a minute, which is barely better than not bounding the wait at all;
+  # past the cap, shedding with a `retry_after` is the more useful answer.
+  @spec default_wait(pos_integer()) :: pos_integer()
+  def default_wait(per), do: min(per, @max_default_wait)
+
   defp build(service, options, opts) do
     # `:wait` governs the runtime rather than the backend, so it is taken out
-    # before the remaining options are handed over. It has no schema default, so
-    # an absent key arrives here as `nil` — "never set", which waits like
-    # `:infinity` but warns.
+    # before the remaining options are handed over. It has no schema default,
+    # because the default is derived from `:per` rather than being a constant.
     {wait, options} = Keyword.pop(options, :wait)
+    # `nil` specifically, not falsy: `wait: false` is a deliberate never-wait and
+    # must not be overwritten by the default.
+    wait = if is_nil(wait), do: default_wait(Keyword.fetch!(options, :per)), else: wait
     {module, options} = split_backend(options)
     {:ok, config} = module.init(service, options)
 

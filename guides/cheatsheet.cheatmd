@@ -148,7 +148,7 @@ rate_limit: [
   limit: 100,               # calls per window
   per: :timer.seconds(1),   # window ms
   wait: :timer.seconds(1)   # :infinity | ms | false
-]                           # unset waits forever, and warns
+]                           # unset: one window (:per), capped at 5s
 
 rate_limit: [limit: :infinity, per: 1_000]   # no limiter at all
 ```
@@ -166,6 +166,7 @@ rate_limit: [limit: 100, per: 1_000, wait: 2_000]
 ```
 
 `wait: false` fails immediately. Never melts the breaker; never retried.
+Use `wait: :infinity` for background work and Flow pipelines.
 
 ### Share a limit across a cluster
 

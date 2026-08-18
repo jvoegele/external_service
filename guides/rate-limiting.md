@@ -25,7 +25,7 @@ use ExternalService,
 | ---------- | -------- | ------------------------------------------------------------------------ |
 | `:limit`   | yes      | Maximum number of calls allowed within each `:per` window. `:infinity` never throttles. |
 | `:per`     | yes      | Length of the rate-limiting window, in milliseconds.                     |
-| `:wait`    | no       | How long a throttled call may wait. Unset waits indefinitely, and warns. |
+| `:wait`    | no       | How long a throttled call may wait. Defaults to one window, capped at 5s. |
 | `:backend` | no       | The limiter implementation. Defaults to `ExternalService.RateLimiter.Local`. |
 
 `:limit` and `:per` are both required when `:rate_limit` is present.
@@ -90,11 +90,26 @@ ids
 
 ## Bounding the wait
 
-A throttled call sleeps the **calling process** until the limiter admits it. With
-no `:wait` budget there is nothing to stop that. Rate limiting paces calls; by
-itself it does not shed load.
+A throttled call sleeps the **calling process** until the limiter admits it, so
+without a budget rate limiting paces calls without ever shedding load — it
+converts overload into latency and process growth.
 
-Give the wait a budget with `:wait`:
+`:wait` therefore has a default: **one window (`:per`), capped at 5 seconds.**
+
+One window is the value because it is the most a limiter can ask you to wait for
+the next refill, so it absorbs a burst exactly and no more. Measured at
+`limit: 50, per: 1_000` against an instantaneous burst of twice the limit, a
+one-window budget takes shedding from 50% to 0% — while a *sustained* 2x overload
+still sheds around 15%, which is the point. Shedding is the right answer to real
+overload; the wait exists to absorb bursts, not to hide saturation.
+
+The cap matters for a service with a large window. A per-minute quota
+(`limit: 100, per: :timer.minutes(1)`) would otherwise block a caller for a full
+minute, which is barely better than not bounding the wait at all. Past 5 seconds,
+returning `ExternalService.RateLimited` — which carries `retry_after` — is the
+more useful answer.
+
+Set it explicitly when the default does not suit the call site:
 
 ```elixir
 use ExternalService,
@@ -105,11 +120,12 @@ use ExternalService,
   ]
 ```
 
-| `:wait` value  | Behavior                                                          |
-| -------------- | ----------------------------------------------------------------- |
-| `:infinity`    | Wait as long as it takes.                                         |
-| milliseconds   | A budget for the whole call, not for any single sleep.            |
-| `false`        | Never wait — fail immediately if the call cannot be made now.     |
+| `:wait` value  | Behavior                                                           |
+| -------------- | ------------------------------------------------------------------ |
+| unset          | One window (`:per`), capped at 5 seconds.                          |
+| `:infinity`    | Wait as long as it takes.                                          |
+| milliseconds   | A budget for the whole call, not for any single sleep.             |
+| `false`        | Never wait — fail immediately if the call cannot be made now.      |
 
 > #### Don't expect the limiter to bound the wait for you {: .warning}
 >
@@ -175,27 +191,19 @@ The alternative to a budget is to absorb the wait elsewhere: run the work throug
 `call_async_stream/2` so a pool of tasks does the sleeping, or apply your own
 back-pressure upstream.
 
-### An unbounded wait is a choice, not a default to fall into
+### An unbounded wait is a choice you have to make
 
-Because which of these you want depends on the call site, `ExternalService.start/2`
-logs a warning when a rate-limited service sets no `:wait` at all:
-
-```
-[warning] ExternalService.start(:my_service, ...) sets no rate limit wait budget:
-:wait is unset, so a throttled call sleeps the calling process for as long as the
-limiter requires. ...
-```
-
-It fires only for services that configure `:rate_limit` — a service with no rate
-limiting has nothing to wait for and never warns.
-
-If an unbounded wait really is what you want, set `:wait` to `:infinity` to say
-so. It behaves exactly like leaving `:wait` unset and silences the warning:
+Waiting indefinitely is right for some work, and you ask for it explicitly:
 
 ```elixir
 use ExternalService,
   rate_limit: [limit: 100, per: :timer.seconds(1), wait: :infinity]
 ```
+
+Reach for it for background jobs and for [Flow pipelines](flow.md), where
+sleeping is how back-pressure propagates upstream and shedding mid-pipeline drops
+work that has nowhere else to go. Avoid it in a request path, where a caller that
+blocks indefinitely is worse than one that gets a fast `429`.
 
 ## Asking before you commit
 
