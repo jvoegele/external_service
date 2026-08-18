@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+- **`:expiry` now honors a budget smaller than 100ms** — a breaking change, and
+  part of the forthcoming 3.0
+  ([issue #70](https://github.com/jvoegele/external_service/issues/70)).
+  `:expiry` is documented as a time budget for retrying, but its final delay was
+  floored at 100ms, so any budget below that was silently rounded up *and* bought
+  an extra attempt. The final delay is now trimmed to whatever is left of the
+  budget, placing the last attempt exactly at the deadline.
+
+  Measured with `backoff: :exponential, base: 10` against a function that always
+  retries:
+
+  | `:expiry` | 2.x | 3.0 |
+  | --------- | --- | --- |
+  | 1ms | 2 attempts, 103ms | 2 attempts, 4ms |
+  | 50ms | 2 attempts, 100ms | 4 attempts, 51ms |
+  | 250ms | 6 attempts, 254ms | 6 attempts, 250ms — unchanged |
+  | 1000ms | 8 attempts, 1001ms | 8 attempts, 1000ms — unchanged |
+
+  **Only budgets under ~100ms are affected**; the floor never engaged above that.
+  Note that such a budget changes in both directions at once — more attempts, in
+  less time — because the retrying now proceeds at the pace the backoff asks for
+  instead of waiting out a 100ms floor.
+
+  Trimming was chosen over halting on the first delay that would overshoot.
+  Halting looks like the stricter reading of "budget" but abandons most of it
+  under exponential backoff — 630ms of a 1000ms budget, 2550ms of 5000ms —
+  because the delay that does not fit is roughly as large as everything before it
+  combined.
+
 ## [2.8.0] - 2026-08-18
 
 ### Added

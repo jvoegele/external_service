@@ -102,7 +102,7 @@ When you use the two-argument `call/2` (no options), the service's default
 | `:base`         | `10`           | Initial delay between retries, in milliseconds (`0` for no delay).                           |
 | `:factor`       | `1`            | Growth factor applied each retry. Only used for `:linear` backoff.                           |
 | `:cap`          | —              | Caps the delay between retries to at most this many milliseconds.                            |
-| `:expiry`       | —              | Total time budget for retries, in milliseconds. Retrying stops once exceeded.                |
+| `:expiry`       | —              | Time budget for the retrying, in milliseconds. The budget is spent, never overshot.          |
 | `:max_attempts` | —              | Maximum number of attempts (initial plus retries). No limit by default.                      |
 | `:jitter`       | `false`        | Random jitter on delays. `true` applies ±10%; a float (e.g. `0.25`) applies that proportion. |
 | `:retry_on`     | —              | Predicate run on the return value; retry when it returns a truthy value (see below).        |
@@ -138,9 +138,11 @@ want an explicit bound. There are two, and they compose:
 
 - **`:max_attempts`** — a count. `max_attempts: 5` means at most five attempts
   total (the first try plus four retries).
-- **`:expiry`** — a time budget in milliseconds. Once cumulative retry time
-  exceeds it, retrying stops. It is checked **between** attempts, so it bounds
-  when the next attempt starts, never how long the current one runs — see
+- **`:expiry`** — a time budget in milliseconds for the retrying. Backoff delays
+  are used as-is while they fit; the one that would overshoot the budget is
+  trimmed instead, so the final attempt starts exactly at the deadline rather
+  than past it. It is checked **between** attempts, so it bounds when the next
+  attempt starts, never how long the current one runs — see
   [Nothing here bounds a single attempt](#nothing-here-bounds-a-single-attempt).
 
 You can use either or both; whichever is reached first stops the retries. When
@@ -165,10 +167,10 @@ sleeps 300ms and then returns `:retry`:
 
 ```
 attempts made: 2
-total elapsed: 706ms
+total elapsed: 621ms
 ```
 
-The 100ms budget stopped the third attempt, but the call still took seven times
+The 100ms budget stopped the third attempt, but the call still took six times
 the budget, because each attempt ran to completion first. Push that further —
 a function that never returns — and `:expiry` is never evaluated at all, so the
 call hangs forever no matter what you set.
