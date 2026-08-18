@@ -492,6 +492,33 @@ defmodule ExternalServiceTest do
       assert ExternalService.available?(@fuse_name)
     end
 
+    test "an :expiry budget is spent but not overshot" do
+      service = "expiry budget service"
+      ExternalService.start(service, circuit_breaker: [tolerate: 100, within: 10_000])
+      on_exit(fn -> ExternalService.stop(service) end)
+
+      Process.put(:attempts, 0)
+
+      # This one asserts on the clock, because the clock is the behavior: a 50ms
+      # budget used to cost 100ms and buy exactly one retry, since the final delay
+      # was floored at 100ms (#70). The bounds are loose enough to survive a busy
+      # machine while still separating the two behaviors.
+      {microseconds, _result} =
+        :timer.tc(fn ->
+          ExternalService.call(service, [backoff: :exponential, base: 10, expiry: 50], fn ->
+            Process.put(:attempts, Process.get(:attempts) + 1)
+            :retry
+          end)
+        end)
+
+      elapsed = div(microseconds, 1000)
+
+      assert elapsed < 95, "a 50ms budget took #{elapsed}ms"
+
+      assert Process.get(:attempts) >= 3,
+             "the budget bought only #{Process.get(:attempts)} attempts"
+    end
+
     test "calls the sleep function for retry backoff, without waiting" do
       service = "retry backoff sleep service"
 

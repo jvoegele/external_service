@@ -22,7 +22,9 @@ defmodule ExternalService.RetryOptions do
     expiry: [
       type: {:or, [:pos_integer, {:in, [:infinity]}]},
       doc:
-        "Total time budget for retries, in milliseconds. Retrying stops once exceeded. " <>
+        "Time budget for the retrying, in milliseconds. Delays that fit are used as-is; the " <>
+          "delay that would overshoot the budget is trimmed instead, so the last attempt starts " <>
+          "exactly at the deadline rather than past it. " <>
           "Defaults to no time budget; `:infinity` states that explicitly (see the note " <>
           "on unbounded retries below)."
     ],
@@ -154,8 +156,12 @@ defmodule ExternalService.RetryOptions do
   # `Retry.DelayStreams` from ElixirRetry (https://github.com/safwank/ElixirRetry,
   # Copyright 2014 Safwan Kamarrudin, Apache License 2.0), and are reimplemented
   # here so that the retry loop — and the sleeping it does — belongs to this
-  # library. Their behavior is deliberately identical; `delay_stream_test.exs`
-  # pins the sequences.
+  # library. `delay_stream_test.exs` pins the sequences.
+  #
+  # They were ported behavior-for-behavior, and the backoff, jitter and cap
+  # builders still are. `:expiry` has since diverged deliberately: it no longer
+  # floors its final delay at 100ms, so a budget smaller than that is honored
+  # rather than rounded up (issue #70).
 
   # Exponential backoff doubles the previous delay. `:factor` is not consulted:
   # it belongs to linear backoff, where it is the increment.
@@ -216,23 +222,24 @@ defmodule ExternalService.RetryOptions do
   # after the initial attempt has already run — so it bounds the retrying rather
   # than the call as a whole.
   #
-  # Note the trailing attempt and the 100ms floor: when the preferred delay would
-  # overshoot the deadline, the stream does not stop. It emits whatever is left of
-  # the budget — but never less than `@min_expiry_delay` — as one final delay, so a
-  # budget under 100ms still costs 100ms and still buys a retry. That contradicts
-  # what `:expiry` documents; it is preserved here so that replacing ElixirRetry
-  # changed nothing, and is tracked separately as issue #70.
-  @min_expiry_delay 100
-
+  # The budget is spent, never overshot, and never abandoned early. A preferred
+  # delay that still fits is used as-is; one that would overshoot is trimmed to
+  # whatever is left, which places the final attempt exactly at the deadline. Only
+  # a budget with nothing left in it stops without a further attempt.
+  #
+  # Trimming rather than halting matters more than it looks: halting on the first
+  # delay that would overshoot abandons most of the budget under exponential
+  # backoff — 630ms of a 1000ms budget, 2550ms of 5000ms — because the delay that
+  # does not fit is roughly as large as everything before it combined.
   defp next_delay_within(remaining, deadline) do
     case Enum.take(remaining, 1) do
       [preferred] ->
-        left = max(deadline - now_ms(), @min_expiry_delay)
+        left = deadline - now_ms()
 
-        if preferred >= left or left == @min_expiry_delay do
-          {[left], :at_end}
-        else
-          {[preferred], {Stream.drop(remaining, 1), deadline}}
+        cond do
+          left <= 0 -> {:halt, :at_end}
+          preferred >= left -> {[left], :at_end}
+          true -> {[preferred], {Stream.drop(remaining, 1), deadline}}
         end
 
       [] ->

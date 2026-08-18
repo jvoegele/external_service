@@ -74,6 +74,11 @@ defmodule ExternalService.DelayStreamTest do
   end
 
   describe ":expiry" do
+    # These tests never sleep, so the clock barely advances while the stream is
+    # drawn and each `left` is computed against almost the whole budget. What they
+    # pin is the stream's *shape*; the wall-clock behavior a real call sees — the
+    # budget being spent but not overshot — is asserted in `external_service_test.exs`.
+
     test "trims the last delay to what is left of the budget, then ends" do
       result = all_delays(backoff: :exponential, base: 10, expiry: 1000)
 
@@ -84,13 +89,11 @@ defmodule ExternalService.DelayStreamTest do
       assert last > 900 and last <= 1000
     end
 
-    test "a budget below 100ms still costs 100ms and grants one retry" do
-      # Characterizes a quirk rather than an intention: `Retry.DelayStreams.expiry/3`
-      # takes a `min_delay` that defaults to 100, and emits `max(remaining, 100)` as
-      # a final attempt instead of halting. See issue #70 — when that is fixed this
-      # assertion should change deliberately, which is the point of pinning it.
-      assert all_delays(backoff: :exponential, base: 10, expiry: 50) == [100]
-      assert all_delays(backoff: :exponential, base: 10, expiry: 1) == [100]
+    test "a small budget is trimmed to fit rather than rounded up" do
+      # Before #70 both of these were `[100]`: the final delay was floored at 100ms,
+      # so a budget under that cost 100ms and bought an extra attempt.
+      assert all_delays(backoff: :exponential, base: 10, expiry: 50) == [10, 20, 40, 50]
+      assert all_delays(backoff: :exponential, base: 10, expiry: 1) == [1]
     end
 
     test "an unset or :infinity budget does not limit the stream" do
