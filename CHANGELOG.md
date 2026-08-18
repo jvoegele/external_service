@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Added
+- **`:retry_exceptions` accepts a predicate, not just a list of modules**
+  ([issue #63](https://github.com/jvoegele/external_service/issues/63)).
+  A module list settles retriability by *type*, which is the wrong grain when
+  the same exception is transient in one instance and permanent in another — an
+  HTTP client that raises one error struct for every status, say. Pass a
+  predicate and it is run on the exception itself:
+
+  ```elixir
+  retry: [
+    retry_exceptions: fn
+      %MyApp.HTTPError{status: status} -> status >= 500
+      _other -> false
+    end
+  ]
+  ```
+
+  A truthy return retries and melts the circuit breaker; anything else
+  propagates the exception untouched, exactly as an unlisted module would. The
+  predicate replaces the list rather than supplementing it, so fold any module
+  checks you still want into it.
+
+  This is what makes the raised half of an [Errata](https://hexdocs.pm/errata)
+  integration expressible — an Errata error type can decide from its own
+  `:reason` or `:context`, and a module list cannot ask it:
+
+  ```elixir
+  retry_exceptions: fn error ->
+    Errata.is_error(error) and Errata.retryable?(error)
+  end
+  ```
 - **The structured error types now declare their retryability**
   ([issue #62](https://github.com/jvoegele/external_service/issues/62)).
   Errata 1.5.0 added a retryability classification, and `Errata.retryable?/1`
@@ -52,6 +82,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   A reason that is not an exception is left in `:context.reason` alone, with no
   `:cause` set.
+
+### Fixed
+- **A retried exception now keeps its original stacktrace.** When retries ran out
+  while retrying an exception, it was re-raised with `raise/1`, which generates a
+  fresh stacktrace — so the trace handed to the caller pointed into
+  `ExternalService`'s own retry loop rather than at the code that raised:
+
+  ```
+  ** (RuntimeError) KABOOM!
+      (external_service) lib/external_service.ex:815: ExternalService.call_with_retry/4
+  ```
+
+  The exception is now re-raised with the stacktrace captured where it was
+  raised. For a library whose failure mode is "your call failed N times", the
+  old behaviour discarded exactly the information you needed.
 
 ### Changed
 - The `:errata` dependency requirement is now `~> 1.5` (was `~> 1.3`).

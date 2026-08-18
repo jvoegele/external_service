@@ -1,3 +1,17 @@
+defmodule ExternalServiceTest.Upstream do
+  @moduledoc false
+  # An exception whose retriability depends on the *instance* rather than the
+  # type, which is what a `:retry_exceptions` predicate exists to express.
+  defexception [:message, :status]
+end
+
+defmodule ExternalServiceTest.Raiser do
+  @moduledoc false
+  # Raises from a named function in a compiled module, so that the stacktrace has
+  # a frame a test can recognise.
+  def boom, do: raise("KABOOM!")
+end
+
 defmodule ExternalServiceTest do
   use ExUnit.Case
   import ExUnit.CaptureLog
@@ -248,6 +262,54 @@ defmodule ExternalServiceTest do
       end
 
       assert ExternalService.available?(@fuse_name)
+    end
+
+    test "retry_exceptions accepts a predicate that decides per instance" do
+      # Given as per-call overrides rather than a struct, so the predicate also
+      # goes through option validation and merging on its way in.
+      retry_opts = [backoff: :linear, base: 0, retry_exceptions: &transient_upstream?/1]
+
+      ExternalService.call(@fuse_name, retry_opts, fn ->
+        Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+        raise ExternalServiceTest.Upstream, message: "gateway timeout", status: 504
+      end)
+
+      assert Process.get(@fuse_name) == @fuse_retries + 1
+    end
+
+    test "an exception the retry_exceptions predicate rejects is not retried or melted" do
+      retry_opts = %{@retry_opts | retry_exceptions: &transient_upstream?/1}
+
+      # Same type as the test above, but a status the predicate calls permanent.
+      for _ <- 1..(@fuse_retries * 3) do
+        assert_raise(ExternalServiceTest.Upstream, fn ->
+          ExternalService.call(@fuse_name, retry_opts, fn ->
+            Process.put(@fuse_name, Process.get(@fuse_name) + 1)
+            raise ExternalServiceTest.Upstream, message: "not found", status: 404
+          end)
+        end)
+      end
+
+      assert Process.get(@fuse_name) == @fuse_retries * 3
+      assert ExternalService.available?(@fuse_name)
+    end
+
+    test "re-raises the original exception with its original stacktrace once retries are spent" do
+      retry_opts = %{@retry_runtime_errors | max_attempts: 2}
+
+      {exception, stacktrace} =
+        try do
+          ExternalService.call(@fuse_name, retry_opts, &ExternalServiceTest.Raiser.boom/0)
+          flunk("expected the exhausted call to re-raise")
+        rescue
+          error -> {error, __STACKTRACE__}
+        end
+
+      assert %RuntimeError{message: "KABOOM!"} = exception
+
+      # The trace must still point at the code that raised, not at the retry loop
+      # that carried the exception around.
+      assert {ExternalServiceTest.Raiser, :boom, 0, _location} = hd(stacktrace)
     end
 
     test "returns CircuitBreakerOpen when the fuse is blown by retries" do
@@ -1000,6 +1062,11 @@ defmodule ExternalServiceTest do
       assert is_integer(sleep_time)
     end
   end
+
+  # A `:retry_exceptions` predicate: the same exception type is transient or
+  # permanent depending on the status it carries.
+  defp transient_upstream?(%ExternalServiceTest.Upstream{status: status}), do: status >= 500
+  defp transient_upstream?(_error), do: false
 
   # Trips a service's circuit breaker by melting it past its configured tolerance.
   defp blow_fuse(name) do

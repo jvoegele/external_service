@@ -94,10 +94,27 @@ background job re-enqueuing itself minutes later, remains perfectly reasonable.
 That is just not the question `retryable?/1` is answering.
 
 Note that these answers describe `ExternalService`'s own errors. Whatever your
-wrapped function returns or raises passes through untouched, retryable or not —
-`ExternalService` does not currently consult `Errata.retryable?/1` when deciding
-whether to retry your function. Use `:retry_on` (or `:retry`/`{:retry, reason}`
-returns) to drive that; see the [Retries](retries.md) guide.
+wrapped function returns or raises passes through untouched by default, retryable
+or not — `ExternalService` never consults `Errata.retryable?/1` on your errors
+unless you ask it to. You can ask with a predicate, on either side:
+
+```elixir
+require Errata
+
+errata_retryable = fn
+  {:error, error} -> Errata.is_error(error) and Errata.retryable?(error)
+  _other -> false
+end
+
+retry: [
+  # ...for errors your function returns
+  retry_on: errata_retryable,
+  # ...and for errors it raises
+  retry_exceptions: fn error -> Errata.is_error(error) and Errata.retryable?(error) end
+]
+```
+
+See the [Retries](retries.md) guide for both options in full.
 
 `RateLimited` and `ServiceSaturated` are worth telling apart. A rate limit is the
 *external service* refusing you, so `429` ("Too Many Requests") passes that on.
@@ -189,10 +206,13 @@ Remember that, by default, exceptions raised by your wrapped function are **not
 retried** — they propagate to the caller (out of both `call/3` and `call!/3`).
 They are also not converted into `ExternalService` error types; a raised
 `MyApp.HTTPError` comes out of `call` as a raised `MyApp.HTTPError`. If you want
-such an exception retried, add its module to the `:retry_exceptions` retry option
-(see [Retries](retries.md)). If you want it returned rather than raised, catch it
-inside your function and return an `{:error, reason}` (or `{:retry, reason}`)
-value.
+such an exception retried, match it with the `:retry_exceptions` retry option —
+which takes either a list of exception modules or a predicate run on the
+exception itself (see [Retries](retries.md)). That holds even once retries run
+out: the original exception is re-raised, with its original stacktrace, rather
+than becoming a `RetriesExhausted`. If you want it returned rather than raised,
+catch it inside your function and return an `{:error, reason}` (or
+`{:retry, reason}`) value.
 
 This matters especially for the async variants. `call_async/1` runs your function
 in a linked `Task`, so an exception that propagates out of it crashes the task —

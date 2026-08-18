@@ -106,7 +106,7 @@ When you use the two-argument `call/2` (no options), the service's default
 | `:max_attempts` | —              | Maximum number of attempts (initial plus retries). No limit by default.                      |
 | `:jitter`       | `false`        | Random jitter on delays. `true` applies ±10%; a float (e.g. `0.25`) applies that proportion. |
 | `:retry_on`     | —              | Predicate run on the return value; retry when it returns a truthy value (see below).        |
-| `:retry_exceptions` | `[]`       | Exception modules that should trigger a retry when raised.                                   |
+| `:retry_exceptions` | `[]`       | Which raised exceptions trigger a retry: a list of exception modules, or a predicate run on the exception (see below). |
 
 Options are validated when the struct is built; an invalid value raises
 `NimbleOptions.ValidationError` with a helpful message.
@@ -264,6 +264,50 @@ Now a raised `MyApp.TransientError` triggers a retry just like a `:retry` return
 value would, and it melts the circuit breaker. Exceptions not in the list still
 propagate untouched and leave the breaker alone — `:retry_exceptions` governs both
 retrying and whether a raised exception counts against the breaker.
+
+If retries run out while retrying an exception, that original exception is
+re-raised — with its original stacktrace, still pointing at the code that raised
+it — rather than being converted into an `ExternalService.RetriesExhausted`.
+
+### Deciding per exception rather than per type
+
+A module list settles the question by type, which is the wrong grain when the
+same exception is transient in one instance and permanent in another — an HTTP
+client that raises one error struct for every status, say. Give
+`:retry_exceptions` a predicate instead and it is run on the exception itself:
+
+```elixir
+retry: [
+  retry_exceptions: fn
+    %MyApp.HTTPError{status: status} -> status >= 500
+    _other -> false
+  end
+]
+```
+
+A truthy return retries and melts the breaker; anything else propagates the
+exception untouched, exactly as an unlisted module would. The predicate replaces
+the list rather than supplementing it, so fold any module checks you still want
+into it:
+
+```elixir
+retry_exceptions: fn
+  %MyApp.HTTPError{status: status} -> status >= 500
+  error -> is_struct(error, DBConnection.ConnectionError)
+end
+```
+
+This pairs well with [Errata](https://hexdocs.pm/errata), whose errors classify
+themselves — an error type can decide from its own `:reason` or `:context` and
+answer through `Errata.retryable?/1`:
+
+```elixir
+require Errata
+
+retry_exceptions: fn error ->
+  Errata.is_error(error) and Errata.retryable?(error)
+end
+```
 
 > #### Prefer return values over exceptions {: .tip}
 >

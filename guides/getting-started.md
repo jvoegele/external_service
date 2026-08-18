@@ -123,8 +123,10 @@ end
 ```
 
 By default, **raised exceptions are not retried** — they propagate to the
-caller. If you want an exception type to trigger a retry, list it in the
-`:retry_exceptions` retry option; to retry based on the return value of a function
+caller. If you want an exception to trigger a retry, match it with the
+`:retry_exceptions` retry option — a list of exception modules, or a predicate on
+the exception when the decision depends on the instance rather than the type. To
+retry based on the return value of a function
 you don't want to modify, use the `:retry_on` predicate. See the
 [Retries](retries.md) guide for the full set of retry knobs.
 
