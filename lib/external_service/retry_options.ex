@@ -51,12 +51,17 @@ defmodule ExternalService.RetryOptions do
           "precedence over the predicate."
     ],
     retry_exceptions: [
-      type: {:list, :atom},
+      type: {:or, [{:list, :atom}, {:fun, 1}]},
       default: [],
       doc:
-        "Exception modules that should trigger a retry when raised. Defaults to `[]`, " <>
-          "meaning raised exceptions are not retried; use `:retry`/`{:retry, reason}` return " <>
-          "values, or the `:retry_on` predicate, to drive retries instead."
+        "Which raised exceptions should trigger a retry, as either a list of exception modules " <>
+          "or a predicate run on the exception itself. A predicate can decide per *instance* " <>
+          "rather than per type — useful when the same exception type is sometimes transient " <>
+          "and sometimes not. Defaults to `[]`, meaning raised exceptions are not retried; use " <>
+          "`:retry`/`{:retry, reason}` return values, or the `:retry_on` predicate, to drive " <>
+          "retries instead. An exception that is not matched also does not melt the circuit " <>
+          "breaker, and once retries are spent the original exception is re-raised with its " <>
+          "original stacktrace."
     ]
   ]
 
@@ -96,7 +101,7 @@ defmodule ExternalService.RetryOptions do
           max_attempts: pos_integer() | :infinity | nil,
           jitter: boolean() | float(),
           retry_on: (term() -> as_boolean(term())) | nil,
-          retry_exceptions: [module()]
+          retry_exceptions: [module()] | (Exception.t() -> as_boolean(term()))
         }
 
   defstruct backoff: :exponential,

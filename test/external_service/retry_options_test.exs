@@ -23,6 +23,27 @@ defmodule ExternalService.RetryOptionsTest do
       assert %RetryOptions{expiry: :infinity} = RetryOptions.new(expiry: :infinity)
     end
 
+    test "accepts :retry_exceptions as either a module list or a predicate" do
+      assert %RetryOptions{retry_exceptions: [RuntimeError]} =
+               RetryOptions.new(retry_exceptions: [RuntimeError])
+
+      predicate = &match?(%RuntimeError{}, &1)
+
+      assert %RetryOptions{retry_exceptions: ^predicate} =
+               RetryOptions.new(retry_exceptions: predicate)
+    end
+
+    test "rejects a :retry_exceptions value that is neither" do
+      assert_raise NimbleOptions.ValidationError, fn ->
+        RetryOptions.new(retry_exceptions: RuntimeError)
+      end
+
+      # A predicate has to take the exception, so arity matters.
+      assert_raise NimbleOptions.ValidationError, fn ->
+        RetryOptions.new(retry_exceptions: fn -> true end)
+      end
+    end
+
     test "rejects other atoms for the bounds" do
       assert_raise NimbleOptions.ValidationError, fn ->
         RetryOptions.new(max_attempts: :unlimited)

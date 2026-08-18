@@ -59,16 +59,17 @@ that fails, where a failure is:
 
 - the function returns `:retry` or `{:retry, reason}`, or
 - the function returns a value matched by the `:retry_on` predicate, or
-- the function raises an exception whose type is listed in the `:retry_exceptions`
-  retry option.
+- the function raises an exception matched by the `:retry_exceptions` retry
+  option — either by being one of the modules it lists, or by satisfying the
+  predicate it holds.
 
 > #### Melt and retry go together for exceptions {: .info}
 >
 > The `:retry_exceptions` retry option governs **both** whether a raised exception
-> is retried **and** whether it melts the breaker. An exception whose type is in
-> `:retry_exceptions` is retried and melts the breaker; an exception that is *not*
-> in `:retry_exceptions` is neither retried nor melted — it propagates to the
-> caller and leaves the breaker untouched.
+> is retried **and** whether it melts the breaker. An exception `:retry_exceptions`
+> matches is retried and melts the breaker; one it does not match is neither
+> retried nor melted — it propagates to the caller and leaves the breaker
+> untouched.
 >
 > Explicit `:retry` / `{:retry, reason}` return values, and results matched by the
 > `:retry_on` predicate, always melt the breaker — they are ways of asking for
