@@ -96,25 +96,10 @@ That is just not the question `retryable?/1` is answering.
 Note that these answers describe `ExternalService`'s own errors. Whatever your
 wrapped function returns or raises passes through untouched by default, retryable
 or not — `ExternalService` never consults `Errata.retryable?/1` on your errors
-unless you ask it to. You can ask with a predicate, on either side:
-
-```elixir
-require Errata
-
-errata_retryable = fn
-  {:error, error} -> Errata.is_error(error) and Errata.retryable?(error)
-  _other -> false
-end
-
-retry: [
-  # ...for errors your function returns
-  retry_on: errata_retryable,
-  # ...and for errors it raises
-  retry_exceptions: fn error -> Errata.is_error(error) and Errata.retryable?(error) end
-]
-```
-
-See the [Retries](retries.md) guide for both options in full.
+unless you ask it to, with the `:retry_on` and `:retry_exceptions` predicates. If
+your application defines its own Errata errors, see
+[Using Errata in Your Application](errata.md) for how the two libraries fit
+together.
 
 `RateLimited` and `ServiceSaturated` are worth telling apart. A rate limit is the
 *external service* refusing you, so `429` ("Too Many Requests") passes that on.
