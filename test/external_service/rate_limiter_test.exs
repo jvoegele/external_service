@@ -117,23 +117,41 @@ defmodule ExternalService.RateLimiterTest do
       assert get_sleep_calls() == [5, 5]
     end
 
-    test "an unset :wait waits like :infinity", %{sleep_spy: spy} do
-      # `:wait` has no schema default: unset arrives as nil so that `start/2` can
-      # tell it apart from a deliberate `:infinity` and warn. The two must behave
-      # identically at runtime.
-      for wait <- [[], [wait: :infinity]] do
-        rate_limiter =
-          :unset_wait
-          |> RateLimiter.new([limit: 1, per: 1_000, backend: {StubLimiter, [wait: 3]}] ++ wait)
-          |> Map.put(:sleep, spy)
+    test "an unset :wait is derived from :per rather than left unbounded" do
+      # One window, capped at 5s. `nil` never survives `new/3`.
+      assert %RateLimiter{wait: 1_000} = RateLimiter.new(:derived, limit: 1, per: 1_000)
+      assert %RateLimiter{wait: 5_000} = RateLimiter.new(:derived, limit: 1, per: 5_000)
+      assert %RateLimiter{wait: 5_000} = RateLimiter.new(:derived_capped, limit: 1, per: 60_000)
+    end
 
-        assert rate_limiter.wait == wait[:wait]
+    test "an explicit :wait is never overwritten by the derived default" do
+      # `false` in particular: it is falsy, so it has to be distinguished from
+      # "unset" by an explicit nil check rather than by `||`.
+      assert %RateLimiter{wait: false} =
+               RateLimiter.new(:explicit_false, limit: 1, per: 1_000, wait: false)
 
-        StubLimiter.deny_next(4)
-        assert RateLimiter.call(rate_limiter, fn -> :through end) == :through
-      end
+      assert %RateLimiter{wait: :infinity} =
+               RateLimiter.new(:explicit_infinity, limit: 1, per: 1_000, wait: :infinity)
 
-      assert get_sleep_calls() == [3, 3, 3, 3, 3, 3, 3, 3]
+      assert %RateLimiter{wait: 25} =
+               RateLimiter.new(:explicit_ms, limit: 1, per: 1_000, wait: 25)
+    end
+
+    test ":infinity still waits as long as the limiter requires", %{sleep_spy: spy} do
+      rate_limiter =
+        :infinite_wait
+        |> RateLimiter.new(
+          limit: 1,
+          per: 1_000,
+          wait: :infinity,
+          backend: {StubLimiter, [wait: 3]}
+        )
+        |> Map.put(:sleep, spy)
+
+      StubLimiter.deny_next(4)
+      assert RateLimiter.call(rate_limiter, fn -> :through end) == :through
+
+      assert get_sleep_calls() == [3, 3, 3, 3]
     end
 
     test "the budget covers the whole call, not each individual sleep", %{sleep_spy: spy} do

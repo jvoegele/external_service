@@ -131,10 +131,15 @@ process, which naturally back-pressures the pipeline upstream. Because a sleepin
 call stalls the rest of its demand batch, a smaller `:max_demand` gives smoother
 pacing under a rate limit.
 
-A pipeline is the case where an unbounded wait is the right answer: sleeping is
-how the back-pressure reaches upstream, so a wait budget would shed work rather
-than pace it. Say so explicitly with `wait: :infinity`, which is also what
-silences the startup warning about an unset `:wait`:
+> #### Set `wait: :infinity` for a pipeline {: .warning}
+>
+> A pipeline is the case where an unbounded wait is the right answer: sleeping is
+> how the back-pressure reaches upstream, so a wait budget sheds work rather than
+> pacing it — and the work in a pipeline usually has nowhere else to go.
+>
+> `:wait` defaults to one window, so **a pipeline has to ask for the unbounded
+> behavior explicitly**. This is the one setting most worth checking when moving
+> a Flow pipeline to 3.0.
 
 ```elixir
 use ExternalService,

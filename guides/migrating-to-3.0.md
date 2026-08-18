@@ -1,12 +1,5 @@
 # Migrating to 3.0
 
-> #### Draft — one value is still undecided {: .error}
->
-> This guide is written ahead of the 3.0 release. Everything below is settled
-> except the single value marked **TBD**: the new `:wait` default, which the
-> roadmap wants re-measured against the Hammer backend before it is committed to
-> (#73). Fill it in and delete this note before 3.0 ships.
-
 ExternalService 3.0 changes four things, and **nothing renames**. Your code
 compiles unchanged; it behaves differently. That is exactly what makes this a
 major version: there is no call site to fix, because the call sites were never
@@ -28,7 +21,7 @@ each has a one-line way to keep the old behavior if it was what you wanted.
 | Area                          | 2.x                                          | 3.0                                       | Keep 2.x behavior with        |
 | ----------------------------- | -------------------------------------------- | ----------------------------------------- | ----------------------------- |
 | Retry bound                   | unbounded — retries forever                  | `max_attempts: 5`                         | `retry: [max_attempts: :infinity]` |
-| Rate limit wait               | unbounded — sleeps until admitted            | finite `:per`-derived `:wait` default     | `rate_limit: [wait: :infinity]` |
+| Rate limit wait               | unbounded — sleeps until admitted            | one window (`:per`), capped at 5s         | `rate_limit: [wait: :infinity]` |
 | `:expiry` under 100ms         | floors the last delay at 100ms and adds an attempt | trims the last delay to the budget  | no equivalent — see below     |
 | `:decorator` dependency       | installed transitively                       | declare it yourself                       | add it to your `deps`         |
 
@@ -109,7 +102,7 @@ unbounded latency and process growth rather than a fast `429` — even though
 # 2.x — a throttled call waits as long as it takes
 ExternalService.start(:my_service, rate_limit: [limit: 50, per: 1_000])
 
-# 3.0 — the same call gives up after TBD and returns RateLimited
+# 3.0 — the same call gives up after one window (1s here) and returns RateLimited
 ```
 
 **To keep the old behavior:**
@@ -128,9 +121,17 @@ rate_limit: [limit: 50, per: 1_000, wait: :infinity]
 > `wait: :infinity` explicitly.** This is the one place where the 2.x default was
 > the correct choice, and 3.0 makes you say so.
 
-The new default is **TBD** — a budget derived from `:per` rather than `false`, because
-`wait: false` sheds load a healthy service should absorb — roughly half of a 2×
-burst, which makes bursty-but-fine traffic look like an outage.
+The new default is **one window — `:per`, capped at 5 seconds** — rather than
+`false`. One window is the most a limiter can ask you to wait for the next
+refill, so it absorbs a burst exactly and no more: measured at
+`limit: 50, per: 1_000`, a 2× instantaneous burst goes from 50% shed to 0%, while
+a *sustained* 2× overload still sheds around 15%. Shedding is the right answer to
+real overload; the wait exists to absorb bursts.
+
+`wait: false` was rejected for the opposite reason — it sheds half of a burst a
+healthy service should absorb, which makes bursty-but-fine traffic look like an
+outage. The 5-second cap keeps a large window sane: a per-minute quota would
+otherwise block a caller for a full minute.
 
 ## 3. `:expiry` no longer overshoots a small budget
 

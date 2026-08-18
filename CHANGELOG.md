@@ -8,6 +8,48 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Changed
+- **The rate limit `:wait` now defaults to one window, capped at 5 seconds** — a
+  breaking change, and part of the forthcoming 3.0
+  ([issue #73](https://github.com/jvoegele/external_service/issues/73)).
+  An unset `:wait` used to sleep the calling process until the limiter admitted
+  it, so rate limiting paced calls without ever shedding: sustained throttling
+  became unbounded latency and process growth rather than a fast `429`, even
+  though `ExternalService.RateLimited` already carries `retry_after` and maps to
+  429.
+
+  One window (`:per`) is the value because it is the most a limiter can ask a
+  caller to wait for the next refill — it absorbs a burst exactly and no more.
+  Measured at `limit: 50, per: 1_000` on both the default GCRA limiter and the
+  Hammer backend:
+
+  | offered load | `wait: false` | one window | 2 × window |
+  | --- | --- | --- | --- |
+  | 2× instantaneous burst | 50% shed | **0% shed** | 0% shed |
+  | 2× sustained | 27–35% shed | 15–17% shed | 1–5% shed, ~2× the latency |
+  | 6× sustained | 71–75% shed | 64–67% shed | 55–58% shed |
+
+  A burst is absorbed completely; sustained overload is still shed, which is the
+  point — shedding is the right answer to real overload, and the larger budget
+  buys a lower shed rate only by converting it back into latency. On the
+  fixed-window Hammer backend one window is also the structural answer: a window
+  boundary is never more than `:per` away.
+
+  The 5-second cap keeps the derivation sane for a large window. A per-minute
+  quota (`limit: 100, per: :timer.minutes(1)`) would otherwise block a caller for
+  a full minute, which is barely better than not bounding the wait at all.
+
+  **To keep waiting indefinitely, ask for it:**
+
+  ```elixir
+  rate_limit: [limit: 100, per: 1_000, wait: :infinity]
+  ```
+
+  That is the right setting for background jobs and **for Flow pipelines**, where
+  sleeping is how back-pressure propagates upstream and a budget sheds work that
+  has nowhere else to go. `guides/flow.md` recommends it explicitly, so a pipeline
+  is the configuration most worth checking when upgrading.
+
+  The unset-`:wait` warning is gone, having existed only to announce this.
 - **`:max_attempts` now defaults to `5`** — a breaking change, and part of the
   forthcoming 3.0
   ([issue #43](https://github.com/jvoegele/external_service/issues/43)).

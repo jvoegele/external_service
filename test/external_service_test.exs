@@ -105,53 +105,29 @@ defmodule ExternalServiceTest do
       assert Process.get(service) == 4
     end
 
-    test "warns when a rate limited service sets no wait budget" do
-      log =
-        capture_log(fn ->
-          start_fuse(:"unbounded-wait-warning",
-            retry: [max_attempts: 5],
-            rate_limit: [limit: 10, per: 1_000]
-          )
-        end)
+    test "a rate limited service that sets no wait budget gets one from :per" do
+      # There is no unbounded-wait warning any more, because the wait is bounded
+      # by default. One window, capped at 5s.
+      service = start_fuse(:"derived-wait", rate_limit: [limit: 1, per: 1_000])
 
-      assert log =~ "sets no rate limit wait budget"
-      assert log =~ "wait: :infinity"
+      assert %ExternalService.RateLimiter{wait: 1_000} = rate_limiter(service)
     end
 
-    test "the suggested budget is the service's own :per" do
-      log =
-        capture_log(fn ->
-          start_fuse(:"unbounded-wait-per",
-            retry: [max_attempts: 5],
-            rate_limit: [limit: 10, per: 30_000]
-          )
-        end)
+    test "the derived wait is capped for a large window" do
+      service = start_fuse(:"derived-wait-capped", rate_limit: [limit: 100, per: 60_000])
 
-      assert log =~ "wait: 30000"
+      assert %ExternalService.RateLimiter{wait: 5_000} = rate_limiter(service)
     end
 
-    for {label, wait} <- [
-          {"an explicit :infinity", :infinity},
-          {"false", false},
-          {"a millisecond budget", 2_000}
-        ] do
-      test "does not warn when :wait is #{label}" do
-        log =
-          capture_log(fn ->
-            start_fuse(:"bounded-wait-#{unquote(label)}",
-              retry: [max_attempts: 5],
-              rate_limit: [limit: 10, per: 1_000, wait: unquote(Macro.escape(wait))]
-            )
-          end)
+    test "an explicit :wait is left alone, including false" do
+      for wait <- [false, :infinity, 250] do
+        service =
+          start_fuse(:"explicit-wait-#{inspect(wait)}",
+            rate_limit: [limit: 1, per: 1_000, wait: wait]
+          )
 
-        refute log =~ "sets no rate limit wait budget"
+        assert %ExternalService.RateLimiter{wait: ^wait} = rate_limiter(service)
       end
-    end
-
-    test "does not warn for a service with no rate limit at all" do
-      log = capture_log(fn -> start_fuse(:"no-rate-limit", retry: [max_attempts: 5]) end)
-
-      refute log =~ "sets no rate limit wait budget"
     end
   end
 
@@ -1200,6 +1176,9 @@ defmodule ExternalServiceTest do
   # permanent depending on the status it carries.
   defp transient_upstream?(%ExternalServiceTest.Upstream{status: status}), do: status >= 500
   defp transient_upstream?(_error), do: false
+
+  # Reads a started service's configured rate limiter.
+  defp rate_limiter(service), do: ExternalService.State.get(service).rate_limit
 
   # Trips a service's circuit breaker by melting it past its configured tolerance.
   defp blow_fuse(name) do
