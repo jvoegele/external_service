@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **`:sleep_function` now covers retry backoff**, not just rate-limit and
+  concurrency waiting. The retry loop used to sleep with a hardcoded
+  `:timer.sleep/1` inside the dependency, so backoff was the one wait a caller
+  could not intercept. Tests can now assert on the real backoff configuration
+  instead of flattening it with `base: 0`:
+
+  ```elixir
+  ExternalService.start(service,
+    retry: [max_attempts: 4, backoff: :exponential, base: 100],
+    sleep_function: fn delay -> send(test_process, {:slept, delay}) end
+  )
+
+  ExternalService.call(service, fn -> :retry end)
+
+  assert_received {:slept, 100}
+  assert_received {:slept, 200}
+  assert_received {:slept, 400}
+  ```
+
+  Note that a no-op sleep function is the right tool for retry backoff — the
+  delays are a fixed sequence — but still the wrong one for rate limiting and
+  concurrency, where the wait is a re-check loop and skipping it busy-waits. The
+  Testing guide now says which is which.
+
+### Changed
+- **Removed the [ElixirRetry](https://hex.pm/packages/retry) dependency**
+  ([issue #69](https://github.com/jvoegele/external_service/issues/69)). The
+  retry loop and its delay streams are now part of this library. **No retry
+  behavior changes**: the delay sequences were pinned by characterization tests
+  first, and those tests pass unchanged against the new implementation.
+
+  The delay-stream builders are reimplemented from `Retry.DelayStreams`
+  (ElixirRetry, © 2014 Safwan Kamarrudin, Apache-2.0 — the same license as this
+  project), with attribution in the source.
+
+  This drops the runtime dependency count from six to five, and lets the retry
+  loop use the service's `:sleep_function`. It also removed the project's
+  `.dialyzer_ignore.exs` entirely: its three suppressed `pattern_match` warnings
+  were artifacts of the `Retry.retry/2` macro's success typing, and `mix dialyzer`
+  now reports no warnings at all with no filters in place.
+
+  One deliberate improvement rather than a faithful port: the `:expiry` budget is
+  measured with `System.monotonic_time/1` rather than the system clock, so a clock
+  adjustment mid-call can no longer stretch or collapse a retry budget.
+
 ## [2.7.0] - 2026-08-18
 
 ### Added

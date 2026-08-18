@@ -92,10 +92,13 @@ defmodule ExternalService do
   @type retriable_function :: (-> retriable_function_result())
 
   @typedoc """
-  The sleep function called when a call is throttled to stay within the rate limit.
+  The function used whenever a call waits: between retry attempts, while throttled
+  to stay within the rate limit, and while waiting for a concurrency slot.
 
   Blocking the calling process for an extended period is sometimes undesirable
-  (for example in tests), so this can be overridden. Defaults to `Process.sleep/1`.
+  (for example in tests, where it is the difference between a suite that waits out
+  every backoff and one that does not), so this can be overridden. It is called
+  with the number of milliseconds to wait. Defaults to `Process.sleep/1`.
   """
   @type sleep_function :: (non_neg_integer() -> any())
 
@@ -233,7 +236,10 @@ defmodule ExternalService do
     sleep_function: [
       type: {:fun, 1},
       doc:
-        "Overrides the function used to sleep while rate limited (defaults to `Process.sleep/1`)."
+        "Overrides the function used whenever a call waits — between retry attempts, " <>
+          "while rate limited, and while waiting for a concurrency slot. Called with the " <>
+          "number of milliseconds to wait. Defaults to `Process.sleep/1`; overriding it lets " <>
+          "tests exercise backoff and throttling without waiting for them."
     ]
   ]
 
@@ -249,23 +255,25 @@ defmodule ExternalService do
     # lock-free reads with no process to message or crash. This replaces the
     # previous unsupervised `Agent`.
 
-    defstruct [:service, :circuit_breaker, :rate_limit, :concurrency, :retry_options]
+    defstruct [:service, :circuit_breaker, :rate_limit, :concurrency, :retry_options, :sleep]
 
     @type t :: %__MODULE__{
             service: ExternalService.service(),
             circuit_breaker: ExternalService.CircuitBreaker.t(),
             rate_limit: ExternalService.RateLimiter.t(),
             concurrency: ExternalService.Concurrency.t(),
-            retry_options: ExternalService.RetryOptions.t()
+            retry_options: ExternalService.RetryOptions.t(),
+            sleep: ExternalService.sleep_function()
           }
 
-    def init(service, circuit_breaker, rate_limit, concurrency, retry_options) do
+    def init(service, circuit_breaker, rate_limit, concurrency, retry_options, sleep) do
       state = %__MODULE__{
         service: service,
         circuit_breaker: circuit_breaker,
         rate_limit: rate_limit,
         concurrency: concurrency,
-        retry_options: retry_options
+        retry_options: retry_options,
+        sleep: sleep
       }
 
       :persistent_term.put(key(service), state)
@@ -322,7 +330,9 @@ defmodule ExternalService do
     retry_options = RetryOptions.new(options[:retry])
     warn_unbounded_retries(service, retry_options)
 
-    State.init(service, circuit_breaker, rate_limit, concurrency, retry_options)
+    sleep = Keyword.get(options, :sleep_function, &Process.sleep/1)
+
+    State.init(service, circuit_breaker, rate_limit, concurrency, retry_options, sleep)
     :ok
   end
 
@@ -799,17 +809,7 @@ defmodule ExternalService do
   end
 
   defp call_with_retry(service, state, retry_opts, function) do
-    require Retry
-
-    # `rescue_only: []` disables `Retry`'s own exception handling rather than
-    # configuring it: it only matches by module (`e.__struct__ in exceptions`),
-    # which cannot express the per-instance decision a `:retry_exceptions`
-    # predicate makes. `try_function/4` decides instead, and signals a retriable
-    # exception as an `{:error, _}` tuple — which is what the retry loop already
-    # treats as "go around again" — carrying the stacktrace so the exception can
-    # be re-raised intact once the retries are spent. Note that the default here
-    # is `[RuntimeError]`, so the option cannot simply be omitted.
-    Retry.retry with: RetryOptions.delay_stream(retry_opts), rescue_only: [] do
+    attempt = fn ->
       case CircuitBreaker.ask(service, state.circuit_breaker) do
         :ok ->
           try_function(service, state, retry_opts, function)
@@ -818,16 +818,26 @@ defmodule ExternalService do
           emit_blown(service)
           throw(:blown)
       end
-    after
-      {:no_retry, _} = result -> result
-    else
-      {:error, :retry} = error -> error
-      {:error, {:retry, _reason}} = error -> error
+    end
+
+    retry_opts
+    |> RetryOptions.delay_stream()
+    |> run_attempts(attempt, state.sleep)
+    |> case do
+      {:no_retry, _} = result ->
+        result
+
+      {:error, :retry} = error ->
+        error
+
+      {:error, {:retry, _reason}} = error ->
+        error
+
       # Retries are spent on an exception we were retrying: re-raise the original
       # with its original stacktrace, so the trace still points at the code that
       # raised rather than at this retry loop.
-      {:error, {:retry_exception, exception, stacktrace}} -> reraise(exception, stacktrace)
-      error -> raise(error)
+      {:error, {:retry_exception, exception, stacktrace}} ->
+        reraise(exception, stacktrace)
     end
   catch
     :blown ->
@@ -839,6 +849,31 @@ defmodule ExternalService do
     :saturated ->
       {:error, {:saturated, service}}
   end
+
+  # The retry loop. Each element of `delays` is how long to sleep *before* the
+  # attempt that follows it, so the first attempt is made immediately and the
+  # stream running out is what ends the retrying. An attempt that does not ask for
+  # another wins immediately; otherwise the last attempt's answer is the call's,
+  # which is how an exhausted call reports the reason it kept retrying.
+  #
+  # Sleeping goes through the service's `:sleep_function` so that a test can drive
+  # backoff without waiting for it.
+  defp run_attempts(delays, attempt, sleep) do
+    case attempt.() do
+      {:no_retry, _} = result -> result
+      retry -> retry_attempts(delays, attempt, sleep, retry)
+    end
+  end
+
+  defp retry_attempts(delays, attempt, sleep, first_retry) do
+    Enum.reduce_while(delays, first_retry, fn delay, _previous ->
+      sleep.(delay)
+      continue_unless_settled(attempt.())
+    end)
+  end
+
+  defp continue_unless_settled({:no_retry, _} = result), do: {:halt, result}
+  defp continue_unless_settled(retry), do: {:cont, retry}
 
   @spec try_function(service, State.t(), RetryOptions.t(), retriable_function) ::
           {:error, {:retry, any}}
