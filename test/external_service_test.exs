@@ -799,6 +799,12 @@ defmodule ExternalServiceTest do
   end
 
   describe "structured errors" do
+    @one_attempt %RetryOptions{backoff: :linear, base: 0, max_attempts: 1}
+
+    setup do
+      ExternalService.start(@fuse_name, circuit_breaker: [tolerate: 50, within: 10_000])
+    end
+
     test "errors returned by call/3 are exceptions that can also be raised" do
       {:error, error} = ExternalService.call(:not_started, fn -> :noop end)
 
@@ -813,6 +819,39 @@ defmodule ExternalServiceTest do
       assert ExternalService.CircuitBreakerOpen.http_status(%CircuitBreakerOpen{}) == 503
       # ...but a service that was never started is a programming error (500).
       assert ExternalService.ServiceNotStarted.http_status(%ServiceNotStarted{}) == 500
+    end
+
+    test "retryable? distinguishes conditions that clear on their own" do
+      # The wrapped function never ran and the condition passes: worth another go.
+      assert Errata.retryable?(%CircuitBreakerOpen{})
+      assert Errata.retryable?(%ExternalService.RateLimited{})
+      assert Errata.retryable?(%ExternalService.ServiceSaturated{})
+
+      # Retrying is exactly what already failed...
+      refute Errata.retryable?(%RetriesExhausted{})
+      # ...and nothing changes until the service is actually started.
+      refute Errata.retryable?(%ServiceNotStarted{})
+    end
+
+    test "an exception retry reason is chained as the cause" do
+      cause = ArgumentError.exception("upstream said no")
+
+      {:error, error} =
+        ExternalService.call(@fuse_name, @one_attempt, fn -> {:retry, cause} end)
+
+      assert %RetriesExhausted{context: %{reason: ^cause}} = error
+      assert Errata.cause(error) == cause
+      assert Errata.root_cause(error) == cause
+      assert Errata.format_chain(error) =~ "Caused by: "
+      assert Errata.format_chain(error) =~ "upstream said no"
+    end
+
+    test "a non-exception retry reason leaves the cause unset" do
+      {:error, error} =
+        ExternalService.call(@fuse_name, @one_attempt, fn -> {:retry, :timeout} end)
+
+      assert %RetriesExhausted{context: %{reason: :timeout}} = error
+      assert Errata.cause(error) == nil
     end
   end
 

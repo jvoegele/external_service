@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **The structured error types now declare their retryability**
+  ([issue #62](https://github.com/jvoegele/external_service/issues/62)).
+  Errata 1.5.0 added a retryability classification, and `Errata.retryable?/1`
+  exposes it for any Errata error. Left to the default for infrastructure
+  errors, all five of `ExternalService`'s error types would have answered
+  `true` — including `ServiceNotStarted`, where retrying can never help.
+  Each type now says so for itself:
+
+  | Error                | `retryable?/1` |
+  | -------------------- | -------------- |
+  | `CircuitBreakerOpen` | `true`         |
+  | `RateLimited`        | `true`         |
+  | `ServiceSaturated`   | `true`         |
+  | `RetriesExhausted`   | `false`        |
+  | `ServiceNotStarted`  | `false`        |
+
+  The three retryable ones share a shape: the wrapped function never ran, and
+  the condition clears on its own. `ServiceNotStarted` is a configuration
+  mistake — the same reasoning that gives it a `500` rather than a `503`.
+
+  `RetriesExhausted` is the one worth reading twice. It is not retryable because
+  retrying is exactly what has already failed, and an outer loop branching on
+  `retryable?/1` would spin on it. Errata's classification carries no notion of
+  *when*, so this means "not worth retrying now" — re-attempting the work at a
+  coarser layer, such as a background job re-enqueuing itself minutes later, is
+  still perfectly reasonable.
+
+  Note that this describes `ExternalService`'s own errors only. What your wrapped
+  function returns or raises still passes through untouched; `ExternalService`
+  does not consult `Errata.retryable?/1` when deciding whether to retry your
+  function.
+- **An exception retry reason is chained as the error's `:cause`.**
+  When a call exhausts its retries with a reason that is an exception — any
+  Errata error included — that value is now set as `RetriesExhausted`'s `:cause`
+  as well as its `:context.reason`. `Errata.cause/1` and `Errata.root_cause/1`
+  reach the underlying failure, and `Errata.format_chain/1` prints it:
+
+  ```
+  ExternalService.RetriesExhausted: exhausted all retries while calling the external service
+  Caused by: MyApp.UpstreamTimeout: upstream timed out
+  ```
+
+  A reason that is not an exception is left in `:context.reason` alone, with no
+  `:cause` set.
+
+### Changed
+- The `:errata` dependency requirement is now `~> 1.5` (was `~> 1.3`).
+
 ## [2.6.0] - 2026-08-05
 
 ### Added
