@@ -31,9 +31,23 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   ```
 
   If you do not use the annotations, there is nothing to do and one fewer
-  transitive dependency in your tree. Required runtime dependencies drop from six
-  to five — `fuse`, `deep_merge`, `errata`, `nimble_options` and `telemetry` —
-  with `decorator` and `flow` optional alongside them.
+  transitive dependency in your tree.
+- **Removed the `:deep_merge` dependency.** It was used in exactly one place —
+  combining child-spec overrides with the options given to `use ExternalService` —
+  and is replaced by `ExternalService.__merge_config__/2`, about a dozen lines.
+  This one is internal and changes nothing observable.
+
+  The merge is subtler than "recurse into keyword lists", so it was ported
+  deliberately rather than reinvented. In particular an empty override list means
+  two different things depending on the original: `start_link(circuit_breaker: [])`
+  leaves the configured breaker options alone, while `retry_exceptions: []` *does*
+  clear `[RuntimeError]`, because that original is not keyword-shaped. Both rules
+  are pinned by tests, and the port was checked against `DeepMerge.deep_merge/2`
+  across 24 option shapes before the dependency was dropped.
+
+  Together with `:decorator`, this takes the required runtime dependencies from
+  six to **four** — `fuse`, `errata`, `nimble_options` and `telemetry` — with
+  `decorator` and `flow` optional alongside them.
 - **`:expiry` now honors a budget smaller than 100ms** — a breaking change, and
   part of the forthcoming 3.0
   ([issue #70](https://github.com/jvoegele/external_service/issues/70)).
