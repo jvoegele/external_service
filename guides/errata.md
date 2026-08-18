@@ -178,10 +178,11 @@ that branches on `Errata.retryable?/1` will not loop on it. See
 ## Sharp edges
 
 **`Errata.is_error/1` is a guard macro, so its module needs `require Errata`.**
-Without it the predicate raises `UndefinedFunctionError` — and a
-`:retry_exceptions` predicate that raises *replaces* the exception it was asked to
-classify, so what reaches you is the predicate's error rather than your own, and
-nothing is retried. Keep predicates total.
+Without it the predicate raises `UndefinedFunctionError` the first time it runs.
+A predicate that fails is treated as "not retriable" and logs a warning, leaving
+your call's own result or exception untouched — so this shows up as retries that
+never happen, plus a warning naming the option and the service, rather than as a
+mystery exception.
 
 **`Errata.retryable?/1` raises on values that are not Errata errors.** Any
 predicate will eventually be handed something else — a `DBConnection` error, a

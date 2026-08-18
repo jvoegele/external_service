@@ -290,6 +290,18 @@ exception untouched, exactly as an unlisted module would. The predicate replaces
 the list rather than supplementing it, so fold any module checks you still want
 into it:
 
+> #### Predicates must answer for every value {: .info}
+>
+> A predicate is handed every exception the call raises, including ones it does
+> not recognise, so a `%MyApp.HTTPError{}`-only clause will eventually meet
+> something else. A predicate that fails rather than answering — raising,
+> throwing, or exiting — is treated as **no match**: the exception it was asked
+> to classify reaches the caller unchanged, nothing is retried, the breaker is
+> left alone, and a warning naming the option and the service is logged. The same
+> holds for the `:retry_on` predicate, where the call's result passes through
+> untouched. A broken classifier never changes the outcome of a call; it only
+> stops retries from happening.
+
 ```elixir
 retry_exceptions: fn
   %MyApp.HTTPError{status: status} -> status >= 500

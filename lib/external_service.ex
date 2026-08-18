@@ -926,7 +926,7 @@ defmodule ExternalService do
       # when it is one we would retry on. Exceptions not matched by `:retry_exceptions`
       # propagate untouched and leave the breaker alone — `:retry_exceptions` governs
       # both retrying and melting.
-      if retriable_exception?(error, retry_opts.retry_exceptions) do
+      if retriable_exception?(service, error, retry_opts.retry_exceptions) do
         emit_retry(service, error)
         melt(service, state)
         {:error, {:retry_exception, error, __STACKTRACE__}}
@@ -945,7 +945,7 @@ defmodule ExternalService do
   defp maybe_retry_on_result(_service, _state, nil, result), do: {:no_retry, result}
 
   defp maybe_retry_on_result(service, state, predicate, result) when is_function(predicate, 1) do
-    if predicate.(result) do
+    if apply_predicate(service, :retry_on, predicate, result) do
       emit_retry(service, result)
       melt(service, state)
       {:error, {:retry, result}}
@@ -957,12 +957,41 @@ defmodule ExternalService do
   # `:retry_exceptions` is either a list of exception modules — an exception is
   # retriable when its struct is one of them — or a predicate on the exception
   # itself, which can decide per instance rather than per type.
-  defp retriable_exception?(error, predicate) when is_function(predicate, 1) do
-    !!predicate.(error)
+  defp retriable_exception?(service, error, predicate) when is_function(predicate, 1) do
+    apply_predicate(service, :retry_exceptions, predicate, error)
   end
 
-  defp retriable_exception?(error, retry_exceptions) when is_list(retry_exceptions) do
+  defp retriable_exception?(_service, error, retry_exceptions) when is_list(retry_exceptions) do
     Enum.any?(retry_exceptions, fn module -> is_struct(error, module) end)
+  end
+
+  # A retry predicate is arbitrary user code, and `:retry_exceptions` runs it on a
+  # path that is already failing — so a bug in the predicate would otherwise become
+  # the failure the caller sees, in place of the exception it was called to
+  # classify. Any way of not returning an answer (raise, throw, or exit) is treated
+  # as "this predicate did not classify the value", which means no retry: retrying
+  # is the consequential interpretation, and a predicate that just crashed has
+  # demonstrated it cannot authorize it. The call's own result or exception is left
+  # exactly as it was, and the warning is what makes the broken predicate findable.
+  defp apply_predicate(service, option, predicate, value) do
+    !!predicate.(value)
+  rescue
+    error -> predicate_failed(service, option, :error, error, __STACKTRACE__)
+  catch
+    kind, reason -> predicate_failed(service, option, kind, reason, __STACKTRACE__)
+  end
+
+  defp predicate_failed(service, option, kind, reason, stacktrace) do
+    Logger.warning("""
+    The #{inspect(option)} predicate for #{inspect(service)} did not return, so the \
+    call was treated as not retriable and its own result or exception was left \
+    untouched. Fix the predicate: it must answer for every value it can be given, \
+    including ones it does not recognise.
+
+    #{Exception.format(kind, reason, stacktrace)}\
+    """)
+
+    false
   end
 
   defp retries_exhausted(service, reason) do
