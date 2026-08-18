@@ -7,28 +7,15 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
-### Added
-- **A [Tuning](guides/tuning.md) guide**
-  ([issue #81](https://github.com/jvoegele/external_service/issues/81)). Each
-  mechanism was documented on its own page; how they interact was not. The new
-  guide covers which setting controls what (and which one people reach for by
-  mistake), what a configuration costs as a measured table, the three couplings
-  that produce surprises, a two-step rule for sizing the breaker against the
-  retry settings, and worked configurations for a request path, a background job
-  and a Flow pipeline. Every number in it was measured against the library.
+## [3.0.0-rc.1] - 2026-08-18
 
-### Fixed
-- **The recommended HTTP configuration in the Retries guide had a circuit breaker
-  that never opened.** `tolerate: 5, within: :timer.seconds(1)` was paired with
-  retry settings whose window is about 1.5 seconds, so at most four of a call's
-  five melts ever landed inside the same one-second window and `:tolerate` was
-  never reached. Measured against it: **20 consecutive fully-failing calls across
-  30 seconds of continuous failure, with the breaker still closed.**
+3.0 changes four defaults and behaviors, and **renames nothing**. Your code
+compiles unchanged; it behaves differently — which is what makes it a major.
+Each change has a one-line way to keep the 2.x behavior.
 
-  The configuration is now `tolerate: 15, within: :timer.seconds(5)`, which opens
-  on the third consecutive fully-failing call, and both that guide and the
-  Circuit Breakers guide now say that the breaker settings have to be sized
-  against the retry settings rather than chosen independently.
+**Start with the [migration guide](guides/migrating-to-3.0.md).** If your
+application has been running 2.4.0 or later, its first section tells you in about
+a minute which of these affect you, by grepping two strings out of your boot logs.
 
 ### Changed
 - **The rate limit `:wait` now defaults to one window, capped at 5 seconds** — a
@@ -170,6 +157,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   under exponential backoff — 630ms of a 1000ms budget, 2550ms of 5000ms —
   because the delay that does not fit is roughly as large as everything before it
   combined.
+
+### Added
+- **A [Tuning](guides/tuning.md) guide**
+  ([issue #81](https://github.com/jvoegele/external_service/issues/81)). Each
+  mechanism was documented on its own page; how they interact was not. The new
+  guide covers which setting controls what (and which one people reach for by
+  mistake), what a configuration costs as a measured table, the three couplings
+  that produce surprises, a two-step rule for sizing the breaker against the
+  retry settings, and worked configurations for a request path, a background job
+  and a Flow pipeline. Every number in it was measured against the library.
+
+### Fixed
+- **The recommended HTTP configuration in the Retries guide had a circuit breaker
+  that never opened.** `tolerate: 5, within: :timer.seconds(1)` was paired with
+  retry settings whose window is about 1.5 seconds, so at most four of a call's
+  five melts ever landed inside the same one-second window and `:tolerate` was
+  never reached. Measured against it: **20 consecutive fully-failing calls across
+  30 seconds of continuous failure, with the breaker still closed.**
+
+  The configuration is now `tolerate: 15, within: :timer.seconds(5)`, which opens
+  on the third consecutive fully-failing call, and both that guide and the
+  Circuit Breakers guide now say that the breaker settings have to be sized
+  against the retry settings rather than chosen independently.
 
 ## [2.8.0] - 2026-08-18
 
@@ -870,7 +880,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/2.8.0...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.1...HEAD
+[3.0.0-rc.1]: https://github.com/jvoegele/external_service/compare/2.8.0...3.0.0-rc.1
 [2.8.0]: https://github.com/jvoegele/external_service/compare/2.7.0...2.8.0
 [2.7.0]: https://github.com/jvoegele/external_service/compare/2.6.0...2.7.0
 [2.6.0]: https://github.com/jvoegele/external_service/compare/2.5.0...2.6.0
