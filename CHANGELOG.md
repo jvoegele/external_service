@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-08-18
+
 ### Added
 - **`:retry_exceptions` accepts a predicate, not just a list of modules**
   ([issue #63](https://github.com/jvoegele/external_service/issues/63)).
@@ -654,7 +656,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/2.6.0...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/2.7.0...HEAD
+[2.7.0]: https://github.com/jvoegele/external_service/compare/2.6.0...2.7.0
 [2.6.0]: https://github.com/jvoegele/external_service/compare/2.5.0...2.6.0
 [2.5.0]: https://github.com/jvoegele/external_service/compare/2.4.0...2.5.0
 [2.4.0]: https://github.com/jvoegele/external_service/compare/2.3.0...2.4.0
