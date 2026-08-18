@@ -168,7 +168,14 @@ MyApp.Stripe.reset()
 - ~~Decorator-based annotations for marking external calls (#28)~~ — shipped in
   2.1.0 as `ExternalService.Decorator`.
 
-## Deferred to 3.0
+## Deferred to 3.0 — shipped in 3.0
+
+**Both items below shipped in 3.0** (`max_attempts: 5` via #43, and a one-window
+`:wait` capped at 5 seconds via #73), alongside two further breaking changes that
+were not anticipated when this section was written: `:expiry` no longer rounding a
+sub-100ms budget up to 100ms (#70), and `:decorator` becoming an optional
+dependency (#48). The reasoning below is kept as the record of why they waited for
+a major rather than being folded into the 2.x line.
 
 Both items below are the same shape: flip a default that currently never gives
 up. Both were reconsidered for the 2.x line while their warnings were still
