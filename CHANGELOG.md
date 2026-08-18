@@ -8,6 +8,35 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Changed
+- **`:max_attempts` now defaults to `5`** — a breaking change, and part of the
+  forthcoming 3.0
+  ([issue #43](https://github.com/jvoegele/external_service/issues/43)).
+  Retry options that set neither `:max_attempts` nor `:expiry` used to retry
+  **forever**, and the circuit breaker was not a reliable backstop: growing
+  backoff delays outpace its `:within` window, so a fully default breaker paired
+  with `retry: [base: 100]` never opens. Retrying now always stops on its own.
+
+  `5` is the number `ExternalService.start/2` has been suggesting in its
+  unbounded-retries warning since 2.4.0, and that the guides have shown
+  throughout, so an application that took that advice is already on the 3.0
+  default.
+
+  Two things worth knowing about it. With the default `:base` of `10` the delays
+  are `[10, 20, 40, 80]`, so this is a **bound** — 150ms of waiting — rather than
+  a retry window tuned for a real dependency; raise `:base` (`100` for HTTP)
+  rather than the attempt count. And because every failing attempt melts the
+  circuit breaker, five attempts melt five of the ten a default breaker tolerates,
+  so two fully-failing calls now open a breaker that previously never opened at
+  all.
+
+  **To keep unbounded retrying, ask for it:**
+
+  ```elixir
+  retry: [max_attempts: :infinity]
+  ```
+
+  `:infinity` has been accepted since 2.4.0, so this can be set before upgrading.
+  The unbounded-retries warning is gone, having existed only to announce this.
 - **`:decorator` is now an optional dependency** — a breaking change, and part of
   the forthcoming 3.0
   ([issue #48](https://github.com/jvoegele/external_service/issues/48)).
@@ -34,8 +63,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   transitive dependency in your tree.
 - **Removed the `:deep_merge` dependency.** It was used in exactly one place —
   combining child-spec overrides with the options given to `use ExternalService` —
-  and is replaced by `ExternalService.__merge_config__/2`, about a dozen lines.
-  This one is internal and changes nothing observable.
+  and is replaced by an internal helper of about a dozen lines. This one changes
+  nothing observable.
 
   The merge is subtler than "recurse into keyword lists", so it was ported
   deliberately rather than reinvented. In particular an empty override list means

@@ -103,7 +103,7 @@ When you use the two-argument `call/2` (no options), the service's default
 | `:factor`       | `1`            | Growth factor applied each retry. Only used for `:linear` backoff.                           |
 | `:cap`          | —              | Caps the delay between retries to at most this many milliseconds.                            |
 | `:expiry`       | —              | Time budget for the retrying, in milliseconds. The budget is spent, never overshot.          |
-| `:max_attempts` | —              | Maximum number of attempts (initial plus retries). No limit by default.                      |
+| `:max_attempts` | `5`            | Maximum number of attempts, counting the initial one. `:infinity` to retry without a count bound. |
 | `:jitter`       | `false`        | Random jitter on delays. `true` applies ±10%; a float (e.g. `0.25`) applies that proportion. |
 | `:retry_on`     | —              | Predicate run on the return value; retry when it returns a truthy value (see below).        |
 | `:retry_exceptions` | `[]`       | Which raised exceptions trigger a retry: a list of exception modules, or a predicate run on the exception (see below). |
@@ -132,12 +132,11 @@ retry: [backoff: :linear, base: 100, factor: 1]
 
 ## Bounding retries
 
-By default there is **no** `:max_attempts`, `:expiry`, or `:cap`, so returning
-`:retry` repeatedly keeps retrying with an ever-growing delay. You almost always
-want an explicit bound. There are two, and they compose:
+`:max_attempts` defaults to `5`, so retrying always stops on its own. There are
+two bounds and they compose:
 
-- **`:max_attempts`** — a count. `max_attempts: 5` means at most five attempts
-  total (the first try plus four retries).
+- **`:max_attempts`** — a count, defaulting to `5`. `max_attempts: 5` means at
+  most five attempts total (the first try plus four retries).
 - **`:expiry`** — a time budget in milliseconds for the retrying. Backoff delays
   are used as-is while they fit; the one that would overshoot the budget is
   trimmed instead, so the final attempt starts exactly at the deadline rather
@@ -153,6 +152,17 @@ the bound is hit without success, `call/3` returns
 # Stop after 5 attempts OR 5 seconds, whichever comes first.
 retry: [max_attempts: 5, expiry: :timer.seconds(5), backoff: :exponential, base: 100]
 ```
+
+> #### The default is a bound, not an allowance {: .info}
+>
+> With the default `:base` of `10`, five attempts means delays of
+> `[10, 20, 40, 80]` — **150ms of waiting in total**. That is a safety net
+> against retrying forever, not a retry window tuned for a real dependency.
+>
+> If your dependency needs longer, raise `:base` rather than the attempt count:
+> `base: 100` gives the same five attempts across 1.5 seconds, and is the usual
+> starting point for an HTTP service. Raising `:max_attempts` instead makes the
+> circuit breaker trip sooner, for the reason in the warning below.
 
 ### Nothing here bounds a single attempt
 
@@ -181,7 +191,7 @@ attempt is the caller's job; see
 
 > #### Don't rely on the circuit breaker to bound retries {: .warning}
 >
-> The breaker is a backstop, not a retry bound. With no `:max_attempts`/`:expiry`,
+> The breaker is a backstop, not a retry bound. Set `max_attempts: :infinity` and
 > retries stop only when the breaker opens — and that is not guaranteed. The
 > breaker opens after `:tolerate` failures *within* its `:within` window, but
 > exponential backoff keeps widening the gap between attempts. Once the delay
@@ -201,29 +211,22 @@ attempt is the caller's job; see
 > suggests. See
 > [`:tolerate` counts attempts, not calls](circuit-breakers.md#what-counts-as-a-failure).
 
-### Unbounded retries are a choice, not a default to fall into
+### Unbounded retries are a choice you have to make
 
-Because leaving both bounds unset is so rarely what you want,
-`ExternalService.start/2` logs a warning when a service's default retry options
-set neither:
-
-```
-[warning] ExternalService.start(:my_service, ...) sets no retry bound: neither
-:max_attempts nor :expiry is configured, so a call that keeps returning :retry
-will retry forever. ...
-```
-
-If unbounded retrying really is what you want — a background job that should keep
-trying until it succeeds, say — or if every call site supplies its own bound, set
-a bound to `:infinity` to say so. It behaves exactly like leaving the bound unset
-and silences the warning:
+Retrying without a count bound is available, but it has to be asked for:
 
 ```elixir
 ExternalService.start(:my_service, retry: [max_attempts: :infinity])
 ```
 
-Even then, pair it with a `:cap` so the delay between attempts doesn't grow
-without limit.
+That is the right answer for some work — a background job that should keep trying
+until it succeeds, where there is nowhere else for the failure to go. It is
+almost never the right answer in a request path, where a call that never returns
+is worse than one that fails.
+
+If you do reach for it, pair it with an `:expiry`, or at least a `:cap` so the
+delay between attempts doesn't grow without limit. And read the warning above
+first: the circuit breaker will not reliably stop the retrying for you.
 
 ## Capping the delay
 
