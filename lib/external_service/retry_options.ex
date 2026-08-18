@@ -132,6 +132,57 @@ defmodule ExternalService.RetryOptions do
     struct(__MODULE__, validated)
   end
 
+  @doc false
+  # The stream of delays, in milliseconds, that these options describe — one
+  # element per retry, so an `n`-element stream means at most `n + 1` attempts.
+  # The retry loop sleeps for each element in turn and stops when the stream is
+  # exhausted.
+  #
+  # This is not part of the public API, but it is the seam the delay behavior is
+  # tested through: the sequence can be inspected without waiting for it.
+  @spec delay_stream(t()) :: Enumerable.t()
+  def delay_stream(%__MODULE__{} = retry_opts) do
+    import Retry.DelayStreams
+
+    base_stream =
+      case retry_opts.backoff do
+        :exponential -> exponential_backoff(retry_opts.base)
+        :linear -> linear_backoff(retry_opts.base, retry_opts.factor)
+      end
+
+    base_stream
+    |> apply_jitter(retry_opts.jitter)
+    |> apply_if(retry_opts.cap, &cap/2)
+    |> apply_expiry(retry_opts.expiry)
+    |> apply_max_attempts(retry_opts.max_attempts)
+  end
+
+  # `jitter` accepts a boolean or an explicit proportion. Note that
+  # `Retry.DelayStreams.randomize/2` expects a number, so a bare `true` must use
+  # the arity-1 default rather than being passed through.
+  defp apply_jitter(stream, proportion) when is_number(proportion),
+    do: Retry.DelayStreams.randomize(stream, proportion)
+
+  defp apply_jitter(stream, true), do: Retry.DelayStreams.randomize(stream)
+  defp apply_jitter(stream, _falsy), do: stream
+
+  defp apply_if(stream, nil, _fun), do: stream
+  defp apply_if(stream, value, fun), do: fun.(stream, value)
+
+  # Both bounds distinguish `nil` (never set) from `:infinity` (explicitly
+  # unbounded) so that `start/2` can warn about the former, but the two behave
+  # identically here: neither limits the delay stream.
+  defp apply_expiry(stream, unbounded) when unbounded in [nil, :infinity], do: stream
+  defp apply_expiry(stream, expiry), do: Retry.DelayStreams.expiry(stream, expiry)
+
+  # `max_attempts` counts the initial attempt plus retries, so the delay stream
+  # (one delay per retry) is limited to `max_attempts - 1` elements.
+  defp apply_max_attempts(stream, unbounded) when unbounded in [nil, :infinity], do: stream
+
+  defp apply_max_attempts(stream, max_attempts)
+       when is_integer(max_attempts) and max_attempts > 0,
+       do: Stream.take(stream, max_attempts - 1)
+
   @doc """
   Layers a keyword list of per-call overrides onto a `base` struct.
 
