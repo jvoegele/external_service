@@ -942,8 +942,17 @@ defmodule ExternalService do
 
   defp retries_exhausted(service, reason) do
     # The retry reason can be any term, so it is carried in `:context` rather than
-    # in Errata's `:reason` field (which is an atom classifier).
-    Errata.create(RetriesExhausted, context: %{service: service, reason: reason})
+    # in Errata's `:reason` field (which is an atom classifier). When it happens to
+    # be an exception — any Errata error included — it is *also* set as the
+    # `:cause`, which is the slot Errata means for it: that is what makes
+    # `Errata.root_cause/1` reach the underlying failure and
+    # `Errata.format_chain/1` print the chain. A non-exception reason leaves
+    # `:cause` unset rather than
+    # wrapping a bare term that would only add noise to the formatted output.
+    Errata.create(RetriesExhausted,
+      context: %{service: service, reason: reason},
+      cause: if(is_exception(reason), do: reason)
+    )
   end
 
   defp circuit_breaker_open(service) do

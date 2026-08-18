@@ -16,13 +16,13 @@ the structured error types and the choice between `call/3` and `call!/3`.
 infrastructure errors. The same struct is _returned_ by `call/3` (inside an
 `{:error, struct}` tuple) and _raised_ by `call!/3`.
 
-| Error                                | Returned/raised when                                      | `http_status/1` |
-| ------------------------------------ | --------------------------------------------------------- | --------------- |
-| `ExternalService.RetriesExhausted`   | retries (count or time budget) were exhausted             | `503`           |
-| `ExternalService.CircuitBreakerOpen` | a call was rejected because the breaker is open           | `503`           |
-| `ExternalService.ServiceNotStarted`  | a call was made to a service never started with `start/2` | `500`           |
-| `ExternalService.RateLimited`        | a call was throttled beyond the rate limit `:wait` budget | `429`           |
-| `ExternalService.ServiceSaturated`   | a call was shed because the concurrency limit was full    | `503`           |
+| Error                                | Returned/raised when                                      | `http_status/1` | `retryable?/1` |
+| ------------------------------------ | --------------------------------------------------------- | --------------- | -------------- |
+| `ExternalService.RetriesExhausted`   | retries (count or time budget) were exhausted             | `503`           | `false`        |
+| `ExternalService.CircuitBreakerOpen` | a call was rejected because the breaker is open           | `503`           | `true`         |
+| `ExternalService.ServiceNotStarted`  | a call was made to a service never started with `start/2` | `500`           | `false`        |
+| `ExternalService.RateLimited`        | a call was throttled beyond the rate limit `:wait` budget | `429`           | `true`         |
+| `ExternalService.ServiceSaturated`   | a call was shed because the concurrency limit was full    | `503`           | `true`         |
 
 Each carries a `:context` map that always includes the `:service` it relates to.
 `RetriesExhausted` additionally carries `:context.reason` — the value from the
@@ -35,11 +35,69 @@ until the call would have been admitted.
   Logger.error("#{inspect(svc)} exhausted retries: #{inspect(reason)}")
 ```
 
+When that reason is itself an exception — any Errata error included — it is also
+set as the error's `:cause`, so the underlying failure is reachable without
+digging into `:context`:
+
+```elixir
+{:error, error} = ExternalService.call(:my_service, fn -> {:retry, upstream_error} end)
+
+Errata.cause(error)       #=> the upstream error
+Errata.root_cause(error)  #=> the deepest cause, if it wrapped one of its own
+Logger.error(Errata.format_chain(error))
+#=> ExternalService.RetriesExhausted: exhausted all retries while calling the external service
+#=> Caused by: MyApp.UpstreamTimeout: upstream timed out
+```
+
+A reason that is not an exception — `:reason_unknown`, a status tuple, whatever
+your function passed to `{:retry, reason}` — is left in `:context.reason` alone,
+with no `:cause` set.
+
 Because they are Errata infrastructure errors, they also come with an
-`http_status/1` and JSON encoding for free — convenient for turning a failure
-into an HTTP response or a structured log entry. `ServiceNotStarted` maps to
-`500` (it signals a configuration/programming mistake, not a transient outage)
-and `RateLimited` to `429`; the rest map to `503`.
+`http_status/1`, a `retryable?/1`, and JSON encoding for free — convenient for
+turning a failure into an HTTP response or a structured log entry.
+`ServiceNotStarted` maps to `500` (it signals a configuration/programming
+mistake, not a transient outage) and `RateLimited` to `429`; the rest map to
+`503`.
+
+### Retryability
+
+`Errata.retryable?/1` answers whether an error is worth another attempt, and each
+of these types declares its own answer rather than inheriting the default for
+infrastructure errors. Code that handles errors from several sources can branch
+on it without knowing which library produced them:
+
+```elixir
+require Errata
+
+case do_work() do
+  {:error, error} when Errata.is_error(error) ->
+    if Errata.retryable?(error), do: reschedule(), else: give_up(error)
+
+  result ->
+    result
+end
+```
+
+`CircuitBreakerOpen`, `RateLimited` and `ServiceSaturated` are retryable: in all
+three the wrapped function never ran, and the condition clears on its own — the
+breaker resets, the limiter refills, in-flight calls drain.
+
+`ServiceNotStarted` is not: nothing changes until the service is started.
+
+`RetriesExhausted` is not either, which deserves a word. Retrying is precisely
+what has already been tried and failed, so "retry it" is the wrong immediate
+response — and an outer retry loop branching on `retryable?/1` would spin on it.
+Errata's classification has no notion of *when*, though, so read this as "not
+worth retrying now": re-attempting the work at a coarser layer, such as a
+background job re-enqueuing itself minutes later, remains perfectly reasonable.
+That is just not the question `retryable?/1` is answering.
+
+Note that these answers describe `ExternalService`'s own errors. Whatever your
+wrapped function returns or raises passes through untouched, retryable or not —
+`ExternalService` does not currently consult `Errata.retryable?/1` when deciding
+whether to retry your function. Use `:retry_on` (or `:retry`/`{:retry, reason}`
+returns) to drive that; see the [Retries](retries.md) guide.
 
 `RateLimited` and `ServiceSaturated` are worth telling apart. A rate limit is the
 *external service* refusing you, so `429` ("Too Many Requests") passes that on.

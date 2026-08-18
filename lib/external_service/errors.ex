@@ -12,9 +12,23 @@ defmodule ExternalService.RetriesExhausted do
     * `:service` — the fuse name the error relates to.
     * `:reason` — the retry reason: the value from the function's `{:retry, reason}`
       return, or `:reason_unknown` when the function returned a bare `:retry`.
+
+  When that reason is an exception — including any Errata error — it is also set
+  as this error's `:cause`, so `Errata.root_cause/1` reaches the underlying
+  failure and `Errata.format_chain/1` prints the chain.
+
+  ## Retryability
+
+  Unlike the other errors here, this one is **not** retryable: it exists to say
+  that retrying has already been tried and did not work. Note that Errata's
+  classification has no notion of *when* — "not retryable" here means "not worth
+  retrying now". Re-attempting the work at a coarser layer, such as a background
+  job re-enqueuing itself minutes later, is a perfectly reasonable response to
+  this error; it just isn't the question `Errata.retryable?/1` is answering.
   """
   use Errata.InfrastructureError,
-    default_message: "exhausted all retries while calling the external service"
+    default_message: "exhausted all retries while calling the external service",
+    retryable: false
 end
 
 defmodule ExternalService.CircuitBreakerOpen do
@@ -26,9 +40,13 @@ defmodule ExternalService.CircuitBreakerOpen do
   value is returned in an `{:error, error}` tuple by `ExternalService.call/3` and
   raised by `ExternalService.call!/3`. Its `:context` contains the `:service`
   (the fuse name) whose circuit breaker is open.
+
+  This error is retryable: the wrapped function never ran, and the breaker resets
+  itself once its refresh window elapses.
   """
   use Errata.InfrastructureError,
-    default_message: "the circuit breaker for the external service is open"
+    default_message: "the circuit breaker for the external service is open",
+    retryable: true
 end
 
 defmodule ExternalService.RateLimited do
@@ -51,9 +69,13 @@ defmodule ExternalService.RateLimited do
   wait as long as it takes instead. Because the wrapped function never ran, this
   does *not* melt the circuit breaker and is not retried — retrying immediately
   would only be throttled again.
+
+  It is nevertheless retryable in Errata's sense: the call is worth making again
+  once the limiter has room, and `:context.retry_after` says when that is.
   """
   use Errata.InfrastructureError,
-    default_message: "the call was throttled beyond the configured rate limit wait time"
+    default_message: "the call was throttled beyond the configured rate limit wait time",
+    retryable: true
 
   # Rate limiting maps naturally onto "Too Many Requests" rather than the default
   # infrastructure-error status (503).
@@ -83,9 +105,14 @@ defmodule ExternalService.ServiceSaturated do
   Because the wrapped function never ran, this does *not* melt the circuit
   breaker and is not retried. Retrying immediately would only find the bulkhead
   full again; shedding is the point. See `ExternalService.Concurrency`.
+
+  Like `ExternalService.RateLimited`, it is still retryable in Errata's sense —
+  the call is worth making again once in-flight calls drain — just not on the
+  spot.
   """
   use Errata.InfrastructureError,
-    default_message: "the service's concurrency limit is fully in use"
+    default_message: "the service's concurrency limit is fully in use",
+    retryable: true
 end
 
 defmodule ExternalService.ServiceNotStarted do
@@ -99,10 +126,13 @@ defmodule ExternalService.ServiceNotStarted do
   (the fuse name) that was not started.
 
   Unlike the other errors, this one indicates a programming/configuration mistake
-  rather than a transient infrastructure failure, so its `http_status/1` is 500.
+  rather than a transient infrastructure failure, so its `http_status/1` is 500
+  and it is not retryable. Retrying cannot help: nothing changes until the
+  service is started.
   """
   use Errata.InfrastructureError,
-    default_message: "the external service has not been started"
+    default_message: "the external service has not been started",
+    retryable: false
 
   # Override the default infrastructure-error status (503): a service that was
   # never started is a programming/configuration error, not a transient outage.
