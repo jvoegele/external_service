@@ -151,6 +151,15 @@ If you'd rather not wrap each body in `call fn -> ... end`, `ExternalService.Dec
 lets you mark a function as an external call with a `@decorate` annotation and write
 the body directly. It's a thin convenience layer over `call` — nothing more.
 
+> #### Optional dependency {: .info}
+>
+> Like `ExternalService.Flow`, this module exists only when its dependency is
+> present. Add it to your application's deps to use the annotations:
+>
+> ```elixir
+> {:decorator, "~> 1.4"}
+> ```
+
 ```elixir
 defmodule MyApp.Payments do
   use ExternalService.Decorator

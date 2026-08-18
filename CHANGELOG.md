@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Changed
+- **`:decorator` is now an optional dependency** — a breaking change, and part of
+  the forthcoming 3.0
+  ([issue #48](https://github.com/jvoegele/external_service/issues/48)).
+  `ExternalService.Decorator` — the `@decorate external_call` annotations — is a
+  convenience layer that someone using the front door or the functional API never
+  touches, but compiled anyway. It now gets the same treatment
+  `ExternalService.Flow` has always had: the module is compiled only when its
+  dependency is present, and the dependency is not forced on you.
+
+  **If you use `@decorate external_call`, add it to your deps:**
+
+  ```elixir
+  {:decorator, "~> 1.4"}
+  ```
+
+  Unlike the other 3.0 changes this one is loud rather than silent — a build
+  without it fails immediately and names the missing module:
+
+  ```
+  error: module ExternalService.Decorator is not loaded and could not be found
+  ```
+
+  If you do not use the annotations, there is nothing to do and one fewer
+  transitive dependency in your tree. Required runtime dependencies drop from six
+  to five — `fuse`, `deep_merge`, `errata`, `nimble_options` and `telemetry` —
+  with `decorator` and `flow` optional alongside them.
 - **`:expiry` now honors a budget smaller than 100ms** — a breaking change, and
   part of the forthcoming 3.0
   ([issue #70](https://github.com/jvoegele/external_service/issues/70)).
