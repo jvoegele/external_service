@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-08-18
+
 ### Added
 - **`:sleep_function` now covers retry backoff**, not just rate-limit and
   concurrency waiting. The retry loop used to sleep with a hardcoded
@@ -43,8 +45,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   (ElixirRetry, © 2014 Safwan Kamarrudin, Apache-2.0 — the same license as this
   project), with attribution in the source.
 
-  This drops the runtime dependency count from six to five, and lets the retry
-  loop use the service's `:sleep_function`. It also removed the project's
+  This drops the required runtime dependencies from seven to six — `fuse`,
+  `deep_merge`, `decorator`, `errata`, `nimble_options` and `telemetry`, with
+  `flow` optional alongside them — and lets the retry loop use the service's
+  `:sleep_function`. It also removed the project's
   `.dialyzer_ignore.exs` entirely: its three suppressed `pattern_match` warnings
   were artifacts of the `Retry.retry/2` macro's success typing, and `mix dialyzer`
   now reports no warnings at all with no filters in place.
@@ -702,7 +706,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/2.7.0...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/2.8.0...HEAD
+[2.8.0]: https://github.com/jvoegele/external_service/compare/2.7.0...2.8.0
 [2.7.0]: https://github.com/jvoegele/external_service/compare/2.6.0...2.7.0
 [2.6.0]: https://github.com/jvoegele/external_service/compare/2.5.0...2.6.0
 [2.5.0]: https://github.com/jvoegele/external_service/compare/2.4.0...2.5.0
