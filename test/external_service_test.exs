@@ -25,15 +25,22 @@ defmodule ExternalServiceTest do
 
   @fuse_name :"test-fuse"
 
+  # Most tests here are about what drives a retry, and assert that a failing
+  # function keeps being called until the circuit breaker opens. That needs
+  # retrying not to stop first, so they opt out of the `:max_attempts` default of
+  # 5 — which is exactly the migration an application relying on unbounded
+  # retrying has to make.
   @retry_opts %RetryOptions{
     backoff: :linear,
-    base: 0
+    base: 0,
+    max_attempts: :infinity
   }
 
   # Retries raised RuntimeErrors (the new default is to NOT retry exceptions).
   @retry_runtime_errors %RetryOptions{
     backoff: :linear,
     base: 0,
+    max_attempts: :infinity,
     retry_exceptions: [RuntimeError]
   }
 
@@ -64,42 +71,38 @@ defmodule ExternalServiceTest do
       assert :fuse.ask(@fuse_name, :sync) == :ok
     end
 
-    test "warns when neither retry bound is configured" do
-      log = capture_log(fn -> start_fuse(:"unbounded-retry-warning", retry: []) end)
+    test "a service that configures nothing still bounds its retries" do
+      # There is no unbounded-retries warning any more, because there are no
+      # unbounded retries by default. This is what replaced it.
+      service =
+        start_fuse(:"default-retry-bound", circuit_breaker: [tolerate: 100, within: 10_000])
 
-      assert log =~ "sets no retry bound"
-      assert log =~ "retry: [max_attempts: :infinity]"
+      Process.put(service, 0)
+
+      ExternalService.call(service, fn ->
+        Process.put(service, Process.get(service) + 1)
+        :retry
+      end)
+
+      assert Process.get(service) == 5
     end
 
-    test "warns for a service started with no options at all" do
-      log = capture_log(fn -> start_fuse(:"unbounded-retry-no-options", []) end)
+    test "unbounded retrying is still available, explicitly" do
+      service =
+        start_fuse(:"explicit-infinity",
+          circuit_breaker: [tolerate: 3, within: 10_000],
+          retry: [max_attempts: :infinity, backoff: :linear, base: 0]
+        )
 
-      assert log =~ "sets no retry bound"
-    end
+      Process.put(service, 0)
 
-    for {label, retry_opts} <- [
-          {":max_attempts", [max_attempts: 5]},
-          {":expiry", [expiry: 5_000]},
-          {"an explicit :infinity max_attempts", [max_attempts: :infinity]},
-          {"an explicit :infinity expiry", [expiry: :infinity]}
-        ] do
-      test "does not warn when retry options set #{label}" do
-        log =
-          capture_log(fn ->
-            start_fuse(:"bounded-retry-#{unquote(label)}", retry: unquote(retry_opts))
-          end)
+      ExternalService.call(service, fn ->
+        Process.put(service, Process.get(service) + 1)
+        :retry
+      end)
 
-        refute log =~ "sets no retry bound"
-      end
-    end
-
-    test "the warning is about the service's defaults, so a struct is checked too" do
-      log =
-        capture_log(fn ->
-          start_fuse(:"unbounded-retry-struct", retry: %RetryOptions{backoff: :linear, base: 0})
-        end)
-
-      assert log =~ "sets no retry bound"
+      # Nothing bounds the count, so it kept going until the breaker opened.
+      assert Process.get(service) == 4
     end
 
     test "warns when a rate limited service sets no wait budget" do
@@ -267,7 +270,12 @@ defmodule ExternalServiceTest do
     test "retry_exceptions accepts a predicate that decides per instance" do
       # Given as per-call overrides rather than a struct, so the predicate also
       # goes through option validation and merging on its way in.
-      retry_opts = [backoff: :linear, base: 0, retry_exceptions: &transient_upstream?/1]
+      retry_opts = [
+        backoff: :linear,
+        base: 0,
+        max_attempts: :infinity,
+        retry_exceptions: &transient_upstream?/1
+      ]
 
       ExternalService.call(@fuse_name, retry_opts, fn ->
         Process.put(@fuse_name, Process.get(@fuse_name) + 1)
@@ -912,7 +920,9 @@ defmodule ExternalServiceTest do
     test "expiry of :infinity imposes no time budget" do
       name = start_fuse(:"expiry-infinity", circuit_breaker: [tolerate: 5, within: 10_000])
       Process.put(:count, 0)
-      opts = %RetryOptions{backoff: :linear, base: 0, expiry: :infinity}
+      # `:max_attempts` is set to :infinity so that this asserts about `:expiry`
+      # alone rather than about the attempt-count default.
+      opts = %RetryOptions{backoff: :linear, base: 0, expiry: :infinity, max_attempts: :infinity}
 
       ExternalService.call(name, opts, fn ->
         Process.put(:count, Process.get(:count) + 1)

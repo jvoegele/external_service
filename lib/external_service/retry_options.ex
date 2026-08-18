@@ -30,10 +30,11 @@ defmodule ExternalService.RetryOptions do
     ],
     max_attempts: [
       type: {:or, [:pos_integer, {:in, [:infinity]}]},
+      default: 5,
       doc:
-        "Maximum number of attempts (the initial attempt plus retries). " <>
-          "Defaults to no limit; `:infinity` states that explicitly (see the note on " <>
-          "unbounded retries below)."
+        "Maximum number of attempts, counting the initial attempt — so the default of `5` " <>
+          "is one try plus four retries. Use `:infinity` to retry without a count bound " <>
+          "(see the note on unbounded retries below)."
     ],
     jitter: [
       type: {:or, [:boolean, :float]},
@@ -79,21 +80,32 @@ defmodule ExternalService.RetryOptions do
 
   #{NimbleOptions.docs(@schema)}
 
+  ## Bounds
+
+  `:max_attempts` defaults to `5`, so retrying always stops on its own. With the
+  default `:base` of `10` and exponential backoff that is a bound of four retries
+  across roughly 150ms of waiting — deliberately a safety net rather than a tuned
+  policy. If your dependency needs a longer retry window, raise `:base` (`100` is
+  the usual choice for an HTTP service) rather than the attempt count.
+
+  Note that this bound and the circuit breaker's `:tolerate` interact: every
+  failing attempt melts the breaker, so five attempts melt five of the ten a
+  default breaker tolerates, and two fully-failing calls open it.
+
+  `:expiry` adds a time budget alongside the count; whichever is reached first
+  stops the retrying. See [Bounding retries](retries.md#bounding-retries).
+
   ## Unbounded retries
 
-  Neither `:max_attempts` nor `:expiry` has a default, so options that set
-  neither place **no bound on retrying**: a call that keeps returning `:retry`
-  keeps retrying forever. The circuit breaker is not a reliable backstop for
-  this — exponential backoff widens the gap between attempts until failures no
-  longer accumulate fast enough to open it. Almost always, you want one of these
-  set. See [Bounding retries](retries.md#bounding-retries) for the details.
-
-  `ExternalService.start/2` logs a warning when a service's default retry
-  options leave both unset. If unbounded retrying really is what you want — or
-  every call site supplies its own bound — say so explicitly with `:infinity`,
-  which behaves identically but silences the warning:
+  Retrying without a count bound is available, but it has to be asked for:
 
       ExternalService.start(:my_service, retry: [max_attempts: :infinity])
+
+  Be deliberate about it. A call that keeps returning `:retry` then keeps
+  retrying forever, and the circuit breaker is not a reliable backstop —
+  exponential backoff widens the gap between attempts until failures no longer
+  accumulate fast enough to open it. Pair it with an `:expiry`, or reserve it for
+  work that genuinely has nowhere else to go.
   """
 
   @validated_schema NimbleOptions.new!(@schema)
@@ -115,7 +127,7 @@ defmodule ExternalService.RetryOptions do
             factor: 1,
             cap: nil,
             expiry: nil,
-            max_attempts: nil,
+            max_attempts: 5,
             jitter: false,
             retry_on: nil,
             retry_exceptions: []

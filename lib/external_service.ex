@@ -328,7 +328,6 @@ defmodule ExternalService do
       )
 
     retry_options = RetryOptions.new(options[:retry])
-    warn_unbounded_retries(service, retry_options)
 
     sleep = Keyword.get(options, :sleep_function, &Process.sleep/1)
 
@@ -392,35 +391,6 @@ defmodule ExternalService do
 
     :ok
   end
-
-  # Retry options that set neither bound retry forever, and the circuit breaker
-  # does not reliably stop them: exponential backoff eventually spaces attempts
-  # further apart than the breaker's `:within` window, so failures stop
-  # accumulating fast enough to reach `:tolerate`. Warn where the configuration
-  # is written rather than leaving it to be discovered by a call that never
-  # returns. `:infinity` is the acknowledgement — it behaves the same but is
-  # deliberate, so it does not warn.
-  defp warn_unbounded_retries(service, %RetryOptions{max_attempts: nil, expiry: nil}) do
-    Logger.warning("""
-    ExternalService.start(#{inspect(service)}, ...) sets no retry bound: neither \
-    :max_attempts nor :expiry is configured, so a call that keeps returning :retry \
-    will retry forever. The circuit breaker is not a reliable backstop, because \
-    growing backoff delays can outpace its :within window.
-
-    Set a bound:
-
-        ExternalService.start(#{inspect(service)}, retry: [max_attempts: 5])
-
-    If unbounded retries are intended, or every call site passes its own bound, \
-    say so explicitly to silence this warning:
-
-        ExternalService.start(#{inspect(service)}, retry: [max_attempts: :infinity])
-
-    See https://hexdocs.pm/external_service/retries.html#bounding-retries\
-    """)
-  end
-
-  defp warn_unbounded_retries(_service, _retry_options), do: :ok
 
   # A throttled call sleeps the *calling* process until the limiter admits it,
   # and with no `:wait` budget there is nothing to stop that. The limiter itself
