@@ -344,6 +344,11 @@ error rate and how costly a false trip is. Some rules of thumb:
   degraded after it has recovered.
 - Remember the breaker is global to the service. Size it for aggregate traffic,
   not a single caller.
+- Size `:tolerate` and `:within` against your *retry* settings, not
+  independently. Every failing attempt melts, so a fully-failing call spends
+  `:max_attempts` of the budget by itself — and if the retry window is wider than
+  `:within`, those melts never accumulate and the breaker never opens. The
+  [Tuning](tuning.md) guide has the rule and the measurements.
 
 ## Running on more than one node
 
