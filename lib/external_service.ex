@@ -809,7 +809,7 @@ defmodule ExternalService do
     # treats as "go around again" — carrying the stacktrace so the exception can
     # be re-raised intact once the retries are spent. Note that the default here
     # is `[RuntimeError]`, so the option cannot simply be omitted.
-    Retry.retry with: apply_retry_options(retry_opts), rescue_only: [] do
+    Retry.retry with: RetryOptions.delay_stream(retry_opts), rescue_only: [] do
       case CircuitBreaker.ask(service, state.circuit_breaker) do
         :ok ->
           try_function(service, state, retry_opts, function)
@@ -839,48 +839,6 @@ defmodule ExternalService do
     :saturated ->
       {:error, {:saturated, service}}
   end
-
-  defp apply_retry_options(retry_opts) do
-    import Retry.DelayStreams
-
-    delay_stream =
-      case retry_opts.backoff do
-        :exponential -> exponential_backoff(retry_opts.base)
-        :linear -> linear_backoff(retry_opts.base, retry_opts.factor)
-      end
-
-    delay_stream
-    |> apply_jitter(retry_opts.jitter)
-    |> apply_if(retry_opts.cap, &cap/2)
-    |> apply_expiry(retry_opts.expiry)
-    |> apply_max_attempts(retry_opts.max_attempts)
-  end
-
-  # `jitter` accepts a boolean or an explicit proportion. Note that
-  # `Retry.DelayStreams.randomize/2` expects a number, so a bare `true` must use
-  # the arity-1 default rather than being passed through.
-  defp apply_jitter(stream, proportion) when is_number(proportion),
-    do: Retry.DelayStreams.randomize(stream, proportion)
-
-  defp apply_jitter(stream, true), do: Retry.DelayStreams.randomize(stream)
-  defp apply_jitter(stream, _falsy), do: stream
-
-  defp apply_if(stream, nil, _fun), do: stream
-  defp apply_if(stream, value, fun), do: fun.(stream, value)
-
-  # Both bounds distinguish `nil` (never set) from `:infinity` (explicitly
-  # unbounded) so that `start/2` can warn about the former, but the two behave
-  # identically here: neither limits the delay stream.
-  defp apply_expiry(stream, unbounded) when unbounded in [nil, :infinity], do: stream
-  defp apply_expiry(stream, expiry), do: Retry.DelayStreams.expiry(stream, expiry)
-
-  # `max_attempts` counts the initial attempt plus retries, so the delay stream
-  # (one delay per retry) is limited to `max_attempts - 1` elements.
-  defp apply_max_attempts(stream, unbounded) when unbounded in [nil, :infinity], do: stream
-
-  defp apply_max_attempts(stream, max_attempts)
-       when is_integer(max_attempts) and max_attempts > 0,
-       do: Stream.take(stream, max_attempts - 1)
 
   @spec try_function(service, State.t(), RetryOptions.t(), retriable_function) ::
           {:error, {:retry, any}}
