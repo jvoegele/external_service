@@ -1,12 +1,11 @@
 # Migrating to 3.0
 
-> #### Draft — three values are still undecided {: .error}
+> #### Draft — one value is still undecided {: .error}
 >
 > This guide is written ahead of the 3.0 release. Everything below is settled
-> except the three values marked **TBD**, which are the release's actual
-> decisions: the new `:max_attempts` default (#43), the multiple of `:per` the
-> new `:wait` default uses (#73), and how `:decorator` lands (#48). Fill those in
-> and delete this note before 3.0 ships.
+> except the single value marked **TBD**: the new `:wait` default, which the
+> roadmap wants re-measured against the Hammer backend before it is committed to
+> (#73). Fill it in and delete this note before 3.0 ships.
 
 ExternalService 3.0 changes four things, and **nothing renames**. Your code
 compiles unchanged; it behaves differently. That is exactly what makes this a
@@ -28,7 +27,7 @@ each has a one-line way to keep the old behavior if it was what you wanted.
 
 | Area                          | 2.x                                          | 3.0                                       | Keep 2.x behavior with        |
 | ----------------------------- | -------------------------------------------- | ----------------------------------------- | ----------------------------- |
-| Retry bound                   | unbounded — retries forever                  | finite `:max_attempts` default            | `retry: [max_attempts: :infinity]` |
+| Retry bound                   | unbounded — retries forever                  | `max_attempts: 5`                         | `retry: [max_attempts: :infinity]` |
 | Rate limit wait               | unbounded — sleeps until admitted            | finite `:per`-derived `:wait` default     | `rate_limit: [wait: :infinity]` |
 | `:expiry` under 100ms         | floors the last delay at 100ms and adds an attempt | trims the last delay to the budget  | no equivalent — see below     |
 | `:decorator` dependency       | installed transitively                       | declare it yourself                       | add it to your `deps`         |
@@ -65,7 +64,7 @@ with `retry: [base: 100]` never opens.
 # 2.x — retries until it succeeds, however long that takes
 ExternalService.start(:my_service, circuit_breaker: [tolerate: 5, within: 1_000])
 
-# 3.0 — the same call now stops after TBD attempts
+# 3.0 — the same call now stops after 5 attempts
 ```
 
 **What you will see if this affects you.** A call that used to block until it
@@ -83,6 +82,21 @@ retry: [max_attempts: :infinity]
 **Better, where you can:** pick a real bound. Unbounded retrying is almost never
 what a request path wants, and a bound is what lets the circuit breaker do its
 job. See [Retries](retries.md#bounding-retries).
+
+Two things worth knowing about the number `5`. It is what
+`ExternalService.start/2` has been suggesting in its warning since 2.4.0, so if
+you took that advice you are already on the 3.0 default. And it is a **bound**
+rather than a generous allowance: with the default `base: 10` and exponential
+backoff the delays are `[10, 20, 40, 80]`, so a defaulted call waits at most
+150ms across its four retries. If your dependency needs a longer retry window,
+raise `:base` — `base: 100` is the usual choice for HTTP — rather than
+`:max_attempts`.
+
+It also restores the circuit breaker at its own defaults. Every failing attempt
+melts, so five attempts melt five of the ten a default breaker tolerates: two
+fully-failing calls open it. Today, a default breaker paired with default retry
+options never opens at all, because growing backoff delays outpace its `:within`
+window.
 
 ## 2. The rate limit wait is bounded by default
 
