@@ -125,6 +125,33 @@ The generous `:tolerate` is deliberate: every failing attempt melts the breaker,
 so a test that exhausts retries can open a breaker configured with production
 numbers. See [`:tolerate` counts attempts, not calls](circuit-breakers.md#what-counts-as-a-failure).
 
+When you want to keep the *real* backoff configuration under test — because the
+delays are the thing you care about — override `:sleep_function` instead. It is
+called with each delay in turn, so the test can record them rather than wait for
+them:
+
+```elixir
+test "backs off exponentially between attempts" do
+  test_process = self()
+
+  ExternalService.start(service,
+    circuit_breaker: [tolerate: 100, within: :timer.seconds(10)],
+    retry: [max_attempts: 4, backoff: :exponential, base: 100],
+    sleep_function: fn delay -> send(test_process, {:slept, delay}) end
+  )
+
+  ExternalService.call(service, fn -> :retry end)
+
+  assert_received {:slept, 100}
+  assert_received {:slept, 200}
+  assert_received {:slept, 400}
+end
+```
+
+This is the one place a no-op sleep function is the right tool — the delays are a
+finite sequence, so skipping them ends the retrying sooner rather than spinning.
+It is *not* true of rate limiting, as the warning below explains.
+
 ### Rate limits
 
 Use `wait: false`. A throttled call then fails immediately instead of waiting,
@@ -145,17 +172,19 @@ assert {:error, %ExternalService.RateLimited{}} =
 The alternative is to configure a limit your tests never reach, so the limiter
 never comes into play at all.
 
-> #### Do not reach for a no-op `:sleep_function` {: .warning}
+> #### Do not reach for a no-op `:sleep_function` *here* {: .warning}
 >
 > `sleep_function: fn _ms -> :ok end` looks like the obvious way to make
-> throttled calls instant. It isn't: the limiter is asked again immediately,
-> still says wait, and the loop spins until real time has passed. The call takes
-> exactly as long and burns a core doing it.
+> throttled calls instant. For rate limiting it isn't: the limiter is asked again
+> immediately, still says wait, and the loop spins until real time has passed. The
+> call takes exactly as long and burns a core doing it.
 >
 > Measured at `limit: 1, per: 2_000`, the throttled call still took **2000ms**
-> and invoked the no-op **2,075,418 times**. `:sleep_function` is an
-> instrumentation hook — see
-> [Customizing the sleep](rate-limiting.md#customizing-the-sleep).
+> and invoked the no-op **2,075,418 times**. The same applies to waiting for a
+> concurrency slot, which is also waiting on something else to happen.
+>
+> Retry backoff is the exception, because the delays are a fixed sequence rather
+> than a re-check loop — see [Retries](#retries) above.
 
 ## Reaching the failure paths on purpose
 

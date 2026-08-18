@@ -380,4 +380,4 @@ retry: [max_attempts: 3, base: 0]   # instant retries
 rate_limit: [wait: false]           # shed, don't wait
 ```
 
-Never `sleep_function: fn _ -> :ok end` — it busy-waits.
+For rate limits and concurrency, never `sleep_function: fn _ -> :ok end` — it busy-waits. (For retry backoff it is fine: those delays are a fixed sequence.)

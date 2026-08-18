@@ -142,38 +142,107 @@ defmodule ExternalService.RetryOptions do
   # tested through: the sequence can be inspected without waiting for it.
   @spec delay_stream(t()) :: Enumerable.t()
   def delay_stream(%__MODULE__{} = retry_opts) do
-    import Retry.DelayStreams
-
-    base_stream =
-      case retry_opts.backoff do
-        :exponential -> exponential_backoff(retry_opts.base)
-        :linear -> linear_backoff(retry_opts.base, retry_opts.factor)
-      end
-
-    base_stream
+    retry_opts
+    |> backoff_stream()
     |> apply_jitter(retry_opts.jitter)
-    |> apply_if(retry_opts.cap, &cap/2)
+    |> apply_cap(retry_opts.cap)
     |> apply_expiry(retry_opts.expiry)
     |> apply_max_attempts(retry_opts.max_attempts)
   end
 
-  # `jitter` accepts a boolean or an explicit proportion. Note that
-  # `Retry.DelayStreams.randomize/2` expects a number, so a bare `true` must use
-  # the arity-1 default rather than being passed through.
-  defp apply_jitter(stream, proportion) when is_number(proportion),
-    do: Retry.DelayStreams.randomize(stream, proportion)
+  # The delay-stream builders below were originally provided by
+  # `Retry.DelayStreams` from ElixirRetry (https://github.com/safwank/ElixirRetry,
+  # Copyright 2014 Safwan Kamarrudin, Apache License 2.0), and are reimplemented
+  # here so that the retry loop — and the sleeping it does — belongs to this
+  # library. Their behavior is deliberately identical; `delay_stream_test.exs`
+  # pins the sequences.
 
-  defp apply_jitter(stream, true), do: Retry.DelayStreams.randomize(stream)
+  # Exponential backoff doubles the previous delay. `:factor` is not consulted:
+  # it belongs to linear backoff, where it is the increment.
+  defp backoff_stream(%__MODULE__{backoff: :exponential, base: base}) do
+    Stream.unfold(base, fn previous -> {previous, previous * 2} end)
+  end
+
+  # Linear backoff adds `:factor` to the base delay once per retry taken.
+  defp backoff_stream(%__MODULE__{backoff: :linear, base: base, factor: factor}) do
+    Stream.unfold(0, fn retries -> {base + retries * factor, retries + 1} end)
+  end
+
+  # `jitter` accepts a boolean or an explicit proportion, with `true` meaning the
+  # conventional +/- 10%.
+  defp apply_jitter(stream, proportion) when is_number(proportion),
+    do: randomize(stream, proportion)
+
+  defp apply_jitter(stream, true), do: randomize(stream, 0.1)
   defp apply_jitter(stream, _falsy), do: stream
 
-  defp apply_if(stream, nil, _fun), do: stream
-  defp apply_if(stream, value, fun), do: fun.(stream, value)
+  # The shift spans `1 - max_delta` to `max_delta` rather than being symmetric
+  # about zero, because `:rand.uniform/1` starts at 1. Delays are clamped at zero
+  # so that jitter can never turn a short delay negative.
+  defp randomize(stream, proportion) do
+    Stream.map(stream, fn delay ->
+      max_delta = round(delay * proportion)
+      shift = random_uniform(2 * max_delta) - max_delta
+
+      max(delay + shift, 0)
+    end)
+  end
+
+  defp random_uniform(n) when n <= 0, do: 0
+  defp random_uniform(n), do: :rand.uniform(n)
+
+  # A cap clamps each delay without ending the stream — retrying continues, just
+  # never further apart than this.
+  defp apply_cap(stream, nil), do: stream
+  defp apply_cap(stream, cap), do: Stream.map(stream, &min(&1, cap))
 
   # Both bounds distinguish `nil` (never set) from `:infinity` (explicitly
   # unbounded) so that `start/2` can warn about the former, but the two behave
   # identically here: neither limits the delay stream.
   defp apply_expiry(stream, unbounded) when unbounded in [nil, :infinity], do: stream
-  defp apply_expiry(stream, expiry), do: Retry.DelayStreams.expiry(stream, expiry)
+
+  defp apply_expiry(stream, expiry) do
+    Stream.resource(
+      fn -> {stream, now_ms() + expiry} end,
+      fn
+        :at_end -> {:halt, :at_end}
+        {remaining, deadline} -> next_delay_within(remaining, deadline)
+      end,
+      fn _ -> :ok end
+    )
+  end
+
+  # The budget is measured from the first time a delay is asked for — that is,
+  # after the initial attempt has already run — so it bounds the retrying rather
+  # than the call as a whole.
+  #
+  # Note the trailing attempt and the 100ms floor: when the preferred delay would
+  # overshoot the deadline, the stream does not stop. It emits whatever is left of
+  # the budget — but never less than `@min_expiry_delay` — as one final delay, so a
+  # budget under 100ms still costs 100ms and still buys a retry. That contradicts
+  # what `:expiry` documents; it is preserved here so that replacing ElixirRetry
+  # changed nothing, and is tracked separately as issue #70.
+  @min_expiry_delay 100
+
+  defp next_delay_within(remaining, deadline) do
+    case Enum.take(remaining, 1) do
+      [preferred] ->
+        left = max(deadline - now_ms(), @min_expiry_delay)
+
+        if preferred >= left or left == @min_expiry_delay do
+          {[left], :at_end}
+        else
+          {[preferred], {Stream.drop(remaining, 1), deadline}}
+        end
+
+      [] ->
+        {:halt, :at_end}
+    end
+  end
+
+  # Monotonic rather than system time, so that a clock adjustment mid-call cannot
+  # stretch or collapse a retry budget.
+  defp now_ms, do: System.monotonic_time(:millisecond)
 
   # `max_attempts` counts the initial attempt plus retries, so the delay stream
   # (one delay per retry) is limited to `max_attempts - 1` elements.

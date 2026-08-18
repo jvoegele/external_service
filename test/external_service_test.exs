@@ -492,6 +492,33 @@ defmodule ExternalServiceTest do
       assert ExternalService.available?(@fuse_name)
     end
 
+    test "calls the sleep function for retry backoff, without waiting" do
+      service = "retry backoff sleep service"
+
+      sleep = fn delay -> Process.put(:slept, [delay | Process.get(:slept, [])]) end
+
+      ExternalService.start(service,
+        circuit_breaker: [tolerate: 100, within: 10_000],
+        sleep_function: sleep
+      )
+
+      on_exit(fn -> ExternalService.stop(service) end)
+
+      {microseconds, _result} =
+        :timer.tc(fn ->
+          ExternalService.call(
+            service,
+            [backoff: :linear, base: 100, factor: 100, max_attempts: 4],
+            fn -> :retry end
+          )
+        end)
+
+      # Every backoff delay went to the sleep function rather than to the
+      # scheduler, in order, and none of it was actually waited for.
+      assert Enum.reverse(Process.get(:slept)) == [100, 200, 300]
+      assert microseconds < 100_000
+    end
+
     test "calls sleep function when rate limit is reached" do
       service = "sleep test service"
 

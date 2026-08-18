@@ -44,6 +44,23 @@ defmodule ExternalService.TestingGuideExamplesTest do
       assert elapsed < 50_000
     end
 
+    test "a sleep function records the real backoff without waiting for it",
+         %{service: service} do
+      test_process = self()
+
+      ExternalService.start(service,
+        circuit_breaker: [tolerate: 100, within: :timer.seconds(10)],
+        retry: [max_attempts: 4, backoff: :exponential, base: 100],
+        sleep_function: fn delay -> send(test_process, {:slept, delay}) end
+      )
+
+      ExternalService.call(service, fn -> :retry end)
+
+      assert_received {:slept, 100}
+      assert_received {:slept, 200}
+      assert_received {:slept, 400}
+    end
+
     test "wait: false keeps a rate limited test off the clock", %{service: service} do
       ExternalService.start(service,
         retry: [max_attempts: 1],
