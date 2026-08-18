@@ -107,8 +107,17 @@ defmodule ExternalService.DelayStreamTest do
     test "a small budget is trimmed to fit rather than rounded up" do
       # Before #70 both of these were `[100]`: the final delay was floored at 100ms,
       # so a budget under that cost 100ms and bought an extra attempt.
-      assert all_delays(backoff: :exponential, base: 10, expiry: 50) == [10, 20, 40, 50]
-      assert all_delays(backoff: :exponential, base: 10, expiry: 1) == [1]
+      #
+      # The trailing delay is what is left of the budget *measured when it is asked
+      # for*, so it is bounded by the budget rather than equal to it — time spent
+      # drawing the stream comes off it. These therefore assert a bound. (Asserting
+      # `== 50` passed 25 local runs and failed on a slower CI runner at 49.)
+      assert [10, 20, 40, last] = all_delays(backoff: :exponential, base: 10, expiry: 50)
+      assert last <= 50
+
+      # A 1ms budget yields `[1]`, or `[]` if a millisecond has already gone; either
+      # way nothing is floored up to 100.
+      assert [] == Enum.filter(all_delays(backoff: :exponential, base: 10, expiry: 1), &(&1 > 1))
     end
 
     test "an unset or :infinity budget does not limit the stream" do
