@@ -83,6 +83,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   A reason that is not an exception is left in `:context.reason` alone, with no
   `:cause` set.
 
+- **A guide for applications that use Errata themselves**
+  ([Using Errata in Your Application](guides/errata.md)). Covers letting your own
+  error types drive retries through the `:retry_on` and `:retry_exceptions`
+  predicates, the distinction between an error being retryable and a call being
+  safe to repeat, how `RetriesExhausted` chains your error as its `:cause`, and
+  the sharp edges — `require Errata` for the guard macro, guarding
+  `Errata.retryable?/1` against non-Errata values, and aggregates being retryable
+  only when every member is.
+
+  It also documents something that applies well beyond Errata: predicates cannot
+  be given to `use ExternalService` as anonymous functions, because the options
+  are stored in a module attribute. A remote capture
+  (`&MyApp.Retry.retryable_error?/1`) works; the Retries guide now says so too.
+
 ### Fixed
 - **A retried exception now keeps its original stacktrace.** When retries ran out
   while retrying an exception, it was re-raised with `raise/1`, which generates a

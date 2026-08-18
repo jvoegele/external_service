@@ -103,6 +103,9 @@ with these guides:
 - **[Rate Limiting](guides/rate-limiting.md)** — staying under a quota.
 - **[Error Handling](guides/error-handling.md)** — `call` vs `call!` and the
   structured error types.
+- **[Using Errata](guides/errata.md)** — for applications that define their own
+  [Errata](https://hexdocs.pm/errata) errors: letting them drive retries, and
+  what comes back when they don't succeed.
 - **[Telemetry](guides/telemetry.md)** — observing calls, retries, and trips.
 - **[Migrating to 2.0](guides/migrating-to-2.0.md)** — upgrading from 1.x.
 

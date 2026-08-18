@@ -297,17 +297,41 @@ retry_exceptions: fn
 end
 ```
 
+> #### Anonymous functions and `use ExternalService` {: .warning}
+>
+> The examples above pass an anonymous function, which works for
+> `ExternalService.start/2` and for per-call retry options. The options given to
+> `use ExternalService` are stored in a module attribute, though, which cannot
+> hold one:
+>
+> ```elixir
+> use ExternalService, retry: [retry_exceptions: fn error -> ... end]
+> # ** (ArgumentError) cannot inject attribute @__external_service_opts__ into
+> #    function/macro because cannot escape #Function<...>
+> ```
+>
+> Put the predicate in a named function and pass a remote capture —
+> `&MyApp.Retry.transient?/1` — which is a valid attribute value. The same
+> applies to the `:retry_on` predicate.
+
 This pairs well with [Errata](https://hexdocs.pm/errata), whose errors classify
 themselves — an error type can decide from its own `:reason` or `:context` and
 answer through `Errata.retryable?/1`:
 
 ```elixir
-require Errata
+defmodule MyApp.Retry do
+  require Errata
 
-retry_exceptions: fn error ->
-  Errata.is_error(error) and Errata.retryable?(error)
+  def retryable_error?(error), do: Errata.is_error(error) and Errata.retryable?(error)
 end
+
+# ...then, in the service configuration:
+retry: [retry_exceptions: &MyApp.Retry.retryable_error?/1]
 ```
+
+See [Using Errata in Your Application](errata.md) for both boundaries together,
+and for the difference between an error being retryable and a call being safe to
+repeat.
 
 > #### Prefer return values over exceptions {: .tip}
 >
