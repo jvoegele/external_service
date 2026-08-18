@@ -101,6 +101,8 @@ with these guides:
 - **[Retries](guides/retries.md)** — backoff, jitter, attempt/time budgets, and
   retrying on exceptions.
 - **[Rate Limiting](guides/rate-limiting.md)** — staying under a quota.
+- **[Tuning](guides/tuning.md)** — choosing the retry, breaker and limiter
+  settings *together*, with the measurements behind each rule.
 - **[Error Handling](guides/error-handling.md)** — `call` vs `call!` and the
   structured error types.
 - **[Using Errata](guides/errata.md)** — for applications that define their own

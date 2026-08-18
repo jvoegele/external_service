@@ -363,7 +363,7 @@ A solid default for an HTTP-style dependency:
 
 ```elixir
 use ExternalService,
-  circuit_breaker: [tolerate: 5, within: :timer.seconds(1), reset: :timer.seconds(5)],
+  circuit_breaker: [tolerate: 15, within: :timer.seconds(5), reset: :timer.seconds(5)],
   retry: [
     backoff: :exponential,
     base: 100,
@@ -376,4 +376,13 @@ use ExternalService,
 
 This retries transient failures with jittered exponential backoff, never waits
 more than 2 seconds between attempts, gives up after 5 attempts or 10 seconds,
-and lets the circuit breaker take over if the failures are sustained.
+and opens the circuit breaker on the third consecutive fully-failing call.
+
+The breaker settings are sized against the retry settings rather than picked
+independently, and that is not optional. Five attempts spread over a ~1.5 second
+retry window means `:within` has to be wider than 1.5 seconds for the melts to
+accumulate at all, and `:tolerate` has to be about `3 × max_attempts` for three
+calls to be what trips it. Get that wrong and the breaker never opens: see
+[Sizing the breaker against your retry settings](tuning.md#sizing-the-breaker-against-your-retry-settings)
+for the measurement, and the [Tuning](tuning.md) guide for choosing all of these
+together.
