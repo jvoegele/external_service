@@ -92,6 +92,7 @@ defmodule ExternalService.Mixfile do
         "guides/flow.md",
         "guides/cheatsheet.cheatmd",
         "guides/migrating-to-2.0.md",
+        "guides/migrating-to-3.0.md",
         "guides/about.md",
         "README.md": [title: "Overview"],
         "CHANGELOG.md": [title: "Changelog"],
@@ -115,6 +116,7 @@ defmodule ExternalService.Mixfile do
         Reference: [
           "guides/cheatsheet.cheatmd",
           "guides/migrating-to-2.0.md",
+          "guides/migrating-to-3.0.md",
           "guides/about.md"
         ]
       ],
