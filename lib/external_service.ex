@@ -62,6 +62,7 @@ defmodule ExternalService do
   alias ExternalService.CircuitBreaker
   alias ExternalService.CircuitBreakerOpen
   alias ExternalService.Concurrency
+  alias ExternalService.ConfigCheck
   alias ExternalService.RateLimited
   alias ExternalService.RateLimiter
   alias ExternalService.RetriesExhausted
@@ -342,6 +343,28 @@ defmodule ExternalService do
   The `service` is a term that uniquely identifies an external service within the
   scope of an application.
 
+  ## Configuration checks
+
+  These options are validated individually, and then checked *against each other* —
+  because the mistakes worth catching are pairs of options that are each valid and
+  jointly wrong. A window narrower than the failures it has to count, or ten
+  attempts of uncapped exponential backoff, produce a warning naming the setting to
+  change and a value to try.
+
+  Services declared with `use ExternalService` are checked **at compile time**, so
+  the warning carries a file and a line and fails a build compiled with
+  `--warnings-as-errors`. Services started through this function are checked here,
+  which is also what covers child-spec overrides, since those are runtime values.
+
+  Combinations that cannot work at all — rather than merely being unwise — raise
+  instead. Set how findings are reported with:
+
+      config :external_service, on_suspicious_config: :warn   # | :raise | :ignore
+
+  `:warn` is the default. `:raise` is worth setting in a test environment, where a
+  suspicious configuration is better as a failure than as a log line. `:ignore` is
+  for a configuration you have decided is right despite what the checks make of it.
+
   ## Options
 
   #{NimbleOptions.docs(@start_schema)}
@@ -350,6 +373,12 @@ defmodule ExternalService do
   def start(service, options \\ []) do
     options = validate!(service, options)
     validate_breaker_combination!(service, options[:circuit_breaker])
+
+    # After the raises, which reject configurations that cannot work, and before
+    # anything is installed. These are configurations that work and are probably
+    # not what was meant — child-spec overrides are runtime values, so this is the
+    # only place that sees what a service is finally started with.
+    ConfigCheck.report(service, options)
 
     {melt, breaker_options} = Keyword.pop!(options[:circuit_breaker], :melt)
     validate_melt_bound!(service, melt, options[:retry])
@@ -1068,6 +1097,32 @@ defmodule ExternalService do
 
   defp merge_values(_original, override), do: override
 
+  @doc false
+  defmacro __before_compile__(env) do
+    service = Module.get_attribute(env.module, :__external_service__)
+    options = Module.get_attribute(env.module, :__external_service_opts__)
+
+    case {ConfigCheck.reporting(), ConfigCheck.run(service, options)} do
+      {:ignore, _findings} ->
+        :ok
+
+      {_reporting, []} ->
+        :ok
+
+      {:raise, findings} ->
+        raise ArgumentError, Enum.map_join(findings, "\n\n", & &1.message)
+
+      {:warn, findings} ->
+        # `IO.warn/2` with the caller's env gives the warning a file and a line, so
+        # it reads like any other compiler warning and fails a build compiled with
+        # `--warnings-as-errors`. It anchors at the `defmodule` rather than at the
+        # offending option, which is as close as a module attribute can get.
+        Enum.each(findings, &IO.warn(&1.message, env))
+    end
+
+    nil
+  end
+
   @doc """
   Defines a module-based gateway to an external service.
 
@@ -1124,6 +1179,12 @@ defmodule ExternalService do
     quote bind_quoted: [opts: opts] do
       @__external_service__ Keyword.get(opts, :name, __MODULE__)
       @__external_service_opts__ Keyword.delete(opts, :name)
+
+      # Checked from a `@before_compile` hook rather than here, because `__using__`
+      # receives the options as AST: `within: :timer.seconds(1)` has not been
+      # evaluated yet. By the time the hook runs, the module attribute holds real
+      # values.
+      @before_compile ExternalService
 
       @doc false
       def child_spec(overrides \\ []) do
