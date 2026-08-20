@@ -109,13 +109,19 @@ with these guides:
   [Errata](https://hexdocs.pm/errata) errors: letting them drive retries, and
   what comes back when they don't succeed.
 - **[Telemetry](guides/telemetry.md)** — observing calls, retries, and trips.
+- **[Migrating to 3.0](guides/migrating-to-3.0.md)** — upgrading from 2.x.
 - **[Migrating to 2.0](guides/migrating-to-2.0.md)** — upgrading from 1.x.
 
-## Upgrading from 1.x
+## Upgrading
 
-Version 2.0 is a breaking modernization of the library. See the
-[migration guide](guides/migrating-to-2.0.md) and the
-[CHANGELOG](CHANGELOG.md) for the full list of changes.
+Version 3.0 changes several defaults and one behavior, and renames nothing: your
+code compiles unchanged and behaves differently. Start with the
+[3.0 migration guide](guides/migrating-to-3.0.md), whose first section tells you
+in about a minute which changes affect you.
+
+Version 2.0 was a breaking modernization of the library; see the
+[2.0 migration guide](guides/migrating-to-2.0.md). The
+[CHANGELOG](CHANGELOG.md) has the full list of changes for both.
 
 ## License
 
