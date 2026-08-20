@@ -248,8 +248,8 @@ defmodule ExternalService.ConfigCheck do
 
   defp joined(findings), do: findings |> Enum.map_join("\n\n", & &1.message) |> String.trim()
 
-  defp ms(milliseconds) when milliseconds < 1_000, do: "#{milliseconds}ms"
-  defp ms(milliseconds), do: "#{Float.round(milliseconds / 1_000, 1)}s"
+  # Shared with the report, so that a duration reads the same in both.
+  defp ms(milliseconds), do: ExternalService.Explanation.duration(milliseconds)
 
   # Suggested windows are rounded up to something a person would have typed.
   defp suggested_window(needed) when needed <= 10_000, do: ":timer.seconds(10)"
