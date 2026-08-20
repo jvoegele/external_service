@@ -1112,7 +1112,7 @@ defmodule ExternalServiceTest do
 
     # This file's `start_service/2` defaults to `:per_attempt` (see the note on
     # `@retry_opts`); these tests are about the 3.0 default, so they say so.
-    defp per_call_fuse(name, options \\ []) do
+    defp per_call_fuse(name, options) do
       options =
         Keyword.update(
           options,
@@ -1124,7 +1124,7 @@ defmodule ExternalServiceTest do
       start_fuse(name, options)
     end
 
-    defp failing_call(service, max_attempts \\ 5) do
+    defp failing_call(service, max_attempts) do
       ExternalService.call(
         service,
         %RetryOptions{backoff: :linear, base: 0, max_attempts: max_attempts},

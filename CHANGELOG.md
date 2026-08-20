@@ -49,6 +49,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   observable.
 
 ### Added
+- **Configurations are now checked against each other**, at compile time for
+  services declared with `use ExternalService` and at start time for everything
+  else ([issue #91](https://github.com/jvoegele/external_service/issues/91)).
+
+  `NimbleOptions` validates every option in isolation, which is why every trap in
+  the tuning guide is a pair of options that are individually valid and jointly
+  wrong — and why this library shipped a recommended configuration whose breaker
+  never opened. Four checks, each naming the setting to change and a value to try:
+
+  | Finding | What it means |
+  | --- | --- |
+  | uncapped backoff above six attempts | a failing call waits minutes, most of it in the last attempt or two |
+  | a call that trips its own breaker | under `melt: :per_attempt`, one call melts more times than `:tolerate`, so raising `:max_attempts` makes the service give up *sooner* |
+  | unbounded retrying | under `melt: :per_attempt`, the breaker is the only backstop and is not a reliable one |
+  | a window narrower than the failures it counts | `:within` cannot accumulate the failures needed to open the breaker |
+
+  Compile-time findings carry a file and a line and fail a build compiled with
+  `--warnings-as-errors`. Start-time findings are logged, which is what covers the
+  functional API and child-spec overrides — the latter being runtime values that
+  no compile-time check can see.
+
+      config :external_service, on_suspicious_config: :warn   # | :raise | :ignore
+
 - **The circuit breaker's `:within` now defaults to `:auto`**, sizing the
   failure-counting window against the retry options rather than being a flat
   `10_000` with no relationship to them
