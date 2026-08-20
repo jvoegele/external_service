@@ -187,7 +187,9 @@ defmodule ExternalService.ConfigCheckTest do
       capped = put_in(options, [:retry, :cap], 2_000)
 
       assert checks(capped) == [:narrow_window]
-      assert message(capped, :narrow_window) =~ ":timer.seconds(34)"
+      # The suggestion is what `:auto` would install, headroom included, rather
+      # than the bare minimum that triggered the finding.
+      assert message(capped, :narrow_window) =~ ":timer.seconds(67)"
     end
   end
 

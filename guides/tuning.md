@@ -1,12 +1,61 @@
 # Tuning
 
 Each mechanism in this library is documented on its own page, and each is simple
-enough on its own. Together they are not: the retry settings decide how fast the
-circuit breaker trips, the backoff decides whether it trips at all, and the
-attempt count decides how much load a failing dependency takes. This guide is
-about choosing them together.
+enough on its own. Choosing them together used to be the hard part: the retry
+settings decided how fast the circuit breaker tripped, and the breaker's window
+decided whether it tripped at all.
+
+Most of that is gone in 3.0. `:tolerate` counts failing calls, so it no longer
+moves when you change `:max_attempts`; `:within` sizes itself against your retry
+settings; and the configuration you write is checked against itself when you
+compile it. What is left is one coupling worth understanding and a handful of
+judgement calls, which is what this guide is about.
 
 Every number here was measured against the library rather than derived.
+
+## Ask the library first
+
+Before reading further, ask your configuration what it does:
+
+```elixir
+use ExternalService,
+  circuit_breaker: [tolerate: 3],
+  retry: [backoff: :exponential, base: 100, max_attempts: 5]
+```
+
+```elixir
+IO.puts ExternalService.explain(MyApp.Stripe)
+```
+
+```
+MyApp.Stripe
+
+  retry
+    window       1.5s
+    delays       100ms, 200ms, 400ms, 800ms
+    attempts     up to 5
+    time budget  none (:expiry unset)
+
+  circuit breaker
+    opens after      4 failing calls
+    counting window  10s
+    resets after     60s
+    backend          ExternalService.CircuitBreaker.Fuse
+
+  rate limit
+    none  calls are not throttled
+
+  concurrency
+    none  calls are not limited in flight
+
+  a fully-failing call
+    spends  1.5s waiting between attempts
+    plus    however long its 5 attempts take — nothing here bounds a single attempt
+```
+
+It takes a proposed keyword list as well as a started service, so you can try a
+configuration before shipping it. Anything this guide warns about, it also warns
+about — at compile time, on the line where the configuration is written.
 
 ## What you are actually choosing
 
@@ -17,7 +66,7 @@ Four things, and the setting that controls each:
 | How long a failing call keeps trying | `:base`, `:cap` | `:max_attempts` |
 | How many times a failing dependency gets hit | `:max_attempts` | — |
 | When to give up regardless of how slow attempts are | `:expiry` | `:max_attempts` |
-| When to stop calling the dependency at all | `:tolerate`, `:within` | — |
+| How many failing calls before you stop calling | `:tolerate` | — |
 
 The first row is the one people get wrong. A longer retry window and more
 attempts feel like the same thing, and they are not:
@@ -25,14 +74,16 @@ attempts feel like the same thing, and they are not:
 - **The window** costs you nothing but latency on a call that was already
   failing.
 - **The attempt count** also multiplies the load you put on a struggling
-  dependency, and spends the circuit breaker's failure budget.
+  dependency.
 
 So when you want to ride out a longer outage, raise `:base`. Reach for
 `:max_attempts` only when you actually want *more attempts*.
 
 ## What a configuration costs
 
-Total time a call spends waiting between attempts, with exponential backoff:
+Total time a call spends waiting between attempts, with exponential backoff.
+`ExternalService.RetryOptions.window/1` answers this for any configuration; the
+table is here to show the shape.
 
 | `:max_attempts` | `base: 10` | `base: 50` | `base: 100` | `base: 500` |
 | --- | --- | --- | --- | --- |
@@ -56,82 +107,52 @@ account for most of the window.
 | 10 | 51.1s | 6.5s | 11.1s |
 
 At the default of five attempts a cap changes nothing. Past six it is the
-difference between a bounded call and a minute-long one.
+difference between a bounded call and a minute-long one — which is why the
+library warns about an uncapped configuration above six attempts.
 
-## Three couplings worth knowing
+### The coupling that remains
 
-### `:base` multiplies with `:max_attempts`
+`base: 100` is the usual advice for an HTTP dependency, and `max_attempts: 10`
+sounds merely thorough. Together they are a **51-second call**, and nothing about
+either setting hints at the other.
 
-This is the trap the first table exists to show. `base: 100` is the usual advice
-for an HTTP dependency, and `max_attempts: 10` sounds merely thorough. Together
-they are a **51-second call**, and nothing about either setting hints at the
-other.
+If you raise one, look at the table before raising the other — or ask
+`explain/1`, which does it for you.
 
-If you raise one, look at the table before raising the other.
+## Sizing the breaker
 
-### `:max_attempts` spends the breaker's failure budget
-
-Every failing attempt melts the circuit breaker, so a fully-failing call spends
-`:max_attempts` of the `:tolerate` budget by itself. Measured — consecutive
-fully-failing calls before the breaker opens:
-
-| `:tolerate` | `max_attempts: 3` | `5` | `8` | `10` |
-| --- | --- | --- | --- | --- |
-| 5 | 2 | 1 | **0** | **0** |
-| 10 | 3 | 2 | 1 | 1 |
-| 20 | 7 | 4 | 2 | 2 |
-| 25 | 8 | 5 | 3 | 2 |
-
-The zeros are not a rounding artifact. With `tolerate: 5` and `max_attempts: 8`,
-a call melts the breaker five times partway through **its own retry loop**, and
-the remaining attempts are rejected by the breaker it just opened. The first call
-trips its own breaker mid-flight.
-
-### `:within` has to be wider than the retry window
-
-The breaker counts failures *within* a window. If a call's retries are spread
-wider than that window, its melts never accumulate.
-
-This is not a corner case. Until 3.0 this guide's own recommended configuration
-had it — `tolerate: 5, within: 1s` alongside `base: 100, max_attempts: 5`, whose
-retry window is about 1.5 seconds. Measured against it:
-
-```
-consecutive failing calls before the breaker opened: >20
-elapsed: 30012ms of continuous failure
-```
-
-Thirty seconds of a dependency failing every single call, and the breaker stayed
-closed — because at most four of each call's five melts ever landed inside the
-same one-second window, and `:tolerate` was five.
-
-**Rule: `:within` should be at least as wide as your retry window**, which is the
-figure in the first table.
-
-## Sizing the breaker against your retry settings
-
-Those two couplings give a two-step rule:
-
-1. **`:within` ≥ your retry window.** Read the window off the table above.
-2. **`:tolerate` = (failing calls you are willing to absorb) × `:max_attempts`.**
-
-Worked: you want the breaker to open after roughly three dead calls, with
-`base: 100, max_attempts: 5` — a 1.5-second retry window.
+`:tolerate` is the number of failing calls you are willing to absorb; the breaker
+opens on the next one. It is independent of `:max_attempts`, so this is now one
+decision rather than an arithmetic problem:
 
 ```elixir
-circuit_breaker: [tolerate: 15, within: :timer.seconds(5), reset: :timer.seconds(5)],
-retry: [backoff: :exponential, base: 100, cap: 2_000, max_attempts: 5, expiry: 10_000, jitter: true]
+circuit_breaker: [tolerate: 3]
 ```
 
-Measured: the breaker opens on the **3rd** consecutive fully-failing call, and a
-single failing call takes about 1.5 seconds.
+Measured with `base: 100, max_attempts: 5`: the breaker opens on the **4th**
+consecutive fully-failing call, and a single failing call takes about 1.4
+seconds.
 
-Note what the `:expiry` is for there. It is not bounding the backoff — 1.5
-seconds of waiting is nowhere near 10 seconds. It bounds the case the attempt
-count cannot: a *slow* dependency, where five attempts at three seconds each
-would otherwise mean fifteen seconds of call. `:expiry` is checked between
-attempts, so it stops the next one rather than interrupting the current one; see
-[Nothing here bounds a single attempt](retries.md#nothing-here-bounds-a-single-attempt).
+`:within` — the window those failures are counted over — defaults to `:auto` and
+is computed from your retry settings. Set it yourself only when you know
+something the configuration does not, which is usually **how long your attempts
+take**. A configuration states how long it waits *between* attempts and says
+nothing about the attempts themselves, so a dependency that hangs for ten seconds
+per attempt needs a wider window than `:auto` can know to ask for.
+
+> #### The rule this section used to contain {: .info}
+>
+> Before 3.0, `:tolerate` counted failing *attempts*. Sizing a breaker meant
+> multiplying by `:max_attempts` and then checking that `:within` was wider than
+> the whole retry window, because a single call's melts were spread across it.
+> Getting it wrong produced a breaker that never opened — as this guide's own
+> recommended configuration did, staying closed through 20 consecutive failing
+> calls over 30 seconds of continuous failure.
+>
+> Services that keep the old semantics with `circuit_breaker: [melt: :per_attempt]`
+> still need that rule. The library warns when such a configuration has a
+> `:tolerate` smaller than its `:max_attempts`, which is the case where a call
+> trips its own breaker part-way through its own retry loop.
 
 ## Three situations
 
@@ -143,23 +164,30 @@ breaker do the rest.
 
 ```elixir
 use ExternalService,
-  circuit_breaker: [tolerate: 12, within: :timer.seconds(5), reset: :timer.seconds(5)],
+  circuit_breaker: [tolerate: 3, reset: :timer.seconds(5)],
   retry: [backoff: :exponential, base: 100, max_attempts: 4, expiry: 1_000, jitter: true]
   # :wait defaults to one window, which is what you want here
 ```
 
-Measured: a fully-failing call takes about **650ms**, and the breaker opens on the
-**3rd** consecutive one. After that, callers get `CircuitBreakerOpen` immediately
-instead of waiting 650ms to fail.
+Measured: a fully-failing call takes about **670ms**, and the breaker opens on the
+**4th** consecutive one. After that, callers get `CircuitBreakerOpen` immediately
+instead of waiting 670ms to fail. `:within` resolves to 10 seconds.
+
+Note what the `:expiry` is for. It is not bounding the backoff — 700ms of waiting
+is nowhere near a second. It bounds the case the attempt count cannot: a *slow*
+dependency, where four attempts at three seconds each would otherwise mean twelve
+seconds of call. `:expiry` is checked between attempts, so it stops the next one
+rather than interrupting the current one; see
+[Nothing here bounds a single attempt](retries.md#nothing-here-bounds-a-single-attempt).
 
 ### A background job
 
 Nobody is waiting, and the work has nowhere else to go — so trade latency for
-success. This is where the unbounded settings are correct rather than careless.
+success. This is where the patient settings are correct rather than careless.
 
 ```elixir
 use ExternalService,
-  circuit_breaker: [tolerate: 20, within: :timer.seconds(30), reset: :timer.seconds(30)],
+  circuit_breaker: [tolerate: 3, reset: :timer.seconds(30)],
   retry: [
     backoff: :exponential,
     base: 500,
@@ -172,9 +200,20 @@ use ExternalService,
 ```
 
 `max_attempts: :infinity` with an `:expiry` is the useful shape: keep trying, but
-stop after half a minute. Unbounded on *both* is the one combination to avoid —
-the breaker will not reliably rescue you, for the reason in
-[Don't rely on the circuit breaker to bound retries](retries.md#bounding-retries).
+stop after half a minute. Unbounded on *both* is rejected outright — under the
+default melt semantics a call that never gives up never melts the breaker, so
+nothing would stop it.
+
+Measured: a fully-failing call takes **30 seconds**, spending its budget exactly,
+and the breaker opens on the **4th** consecutive one — two minutes into a total
+outage. `:within` resolves to 180 seconds, which is what makes that possible: four
+failures two minutes apart have to be counted over a window wider than two
+minutes.
+
+That number is worth pausing on. A slow service needs a *wider* counting window
+than a fast one, not a narrower one, and it is the single most common thing to get
+wrong by hand. Leave `:within` unset unless you know your attempts are slower than
+your backoff.
 
 If your job runner already retries failed jobs, prefer a modest bound here and
 let re-enqueueing be the outer loop. Two retry layers multiply.
@@ -185,10 +224,13 @@ The important setting is `wait: :infinity`, and it is the one most easily missed
 
 ```elixir
 use ExternalService,
-  circuit_breaker: [tolerate: 20, within: :timer.seconds(10)],
+  circuit_breaker: [tolerate: 3],
   retry: [backoff: :exponential, base: 100, cap: 2_000, max_attempts: 5, jitter: true],
   rate_limit: [limit: 100, per: :timer.seconds(1), wait: :infinity]
 ```
+
+Measured: a fully-failing call takes about **1.5 seconds** and the breaker opens
+on the **4th** consecutive one.
 
 In a pipeline, sleeping is how back-pressure reaches upstream. A `:wait` budget
 sheds work mid-pipeline instead of pacing it, and that work usually has nowhere
@@ -210,10 +252,11 @@ ran. Throttling is not failure. See [Rate limiting](rate-limiting.md).
 
 ## A checklist
 
-- [ ] Read your retry window off the table — is it inside the latency budget of whoever is calling?
-- [ ] Is `:within` at least that wide?
-- [ ] Is `:tolerate` about (calls you will absorb) × `:max_attempts`?
-- [ ] If `:max_attempts` is above 6, is there a `:cap`?
-- [ ] If either bound is `:infinity`, is the *other* one set?
+Four of the seven items this guide used to carry are now checked for you when you
+compile. What is left needs a human:
+
+- [ ] Read your retry window off `explain/1` — is it inside the latency budget of whoever is calling?
+- [ ] Is `:tolerate` the number of failing calls you are actually willing to absorb?
+- [ ] Do you know how long a single *attempt* can take? Nothing here bounds it, and `:within` cannot size itself against it.
 - [ ] Is `:wait` right for the call site — default for a request path, `:infinity` for a pipeline or job?
 - [ ] Is `:jitter` on, if many processes call this service?

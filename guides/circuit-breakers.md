@@ -54,8 +54,8 @@ get the defaults above.
 
 ## What counts as a failure?
 
-The breaker is "melted" — pushed one step toward opening — on every call attempt
-that fails, where a failure is:
+The breaker is "melted" — pushed one step toward opening — once per call whose
+retrying gives up, where a failing attempt is one in which:
 
 - the function returns `:retry` or `{:retry, reason}`, or
 - the function returns a value matched by the `:retry_on` predicate, or
@@ -78,37 +78,43 @@ that fails, where a failure is:
 Values your function simply returns — including its own `{:error, reason}` — are
 successes as far as the breaker is concerned and do not melt it.
 
-> #### `:tolerate` counts attempts, not calls {: .warning}
+> #### `:tolerate` counts calls, not attempts {: .info}
 >
-> The word doing the work above is **attempt**. `:tolerate` reads like "how many
-> failed calls before the breaker opens," but retries melt too: one `call/3` with
-> `max_attempts: 5` that fails throughout contributes 5 melts by itself.
->
-> So `:tolerate` and `:max_attempts` cannot be tuned independently. Measured with
-> this configuration:
+> `:tolerate` reads like "how many failed calls before the breaker opens," and
+> since 3.0 that is what it is. A call melts the breaker **once**, when its
+> retrying gives up, however many attempts it made on the way. Measured with:
 >
 > ```elixir
 > use ExternalService,
->   circuit_breaker: [tolerate: 10, within: :timer.seconds(10)],
+>   circuit_breaker: [tolerate: 10],
 >   retry: [max_attempts: 5]
 > ```
 >
 > ```
-> failing call #1: returned RetriesExhausted,   blown? false
-> failing call #2: returned RetriesExhausted,   blown? false
-> failing call #3: returned CircuitBreakerOpen, blown? true
+> failing calls #1..#10: returned RetriesExhausted,   blown? false
+> failing call  #11:     returned RetriesExhausted,   blown? true
+> failing call  #12:     returned CircuitBreakerOpen
 > ```
 >
-> A breaker that reads as "open after 10 failures" opens during the **third**
-> failing call. (`:fuse` tolerates `:tolerate` melts and opens on the next, so
-> `tolerate: 10` opens on the 11th melt; three calls × 5 attempts = 15 melts,
-> crossing 11 partway through the third.) On a service handling any real
-> concurrency that is a much shorter fuse than the numbers suggest — and the
-> breaker is global, so those calls fail everything else too.
+> `:fuse` tolerates `:tolerate` melts and opens on the next, so `tolerate: 10`
+> opens on the 11th failing call. Changing `:max_attempts` does not move that
+> number.
 >
-> Budget in attempts: pick `:tolerate` as roughly *failing calls you'll accept*
-> × `:max_attempts`. The [Retries](retries.md) guide covers the same interaction
-> from the other side — why the breaker is not a reliable bound on retries.
+> Note that a call which fails some attempts and then **succeeds** melts nothing
+> at all. Retries did their job, and a breaker that opened on a call the caller
+> saw succeed would turn working traffic into errors. If you want to see that a
+> dependency is degraded even while it is succeeding, the
+> `[:external_service, :call, :retry]` telemetry event counts attempts and fires
+> for every one of them.
+>
+> Before 3.0 every failing *attempt* melted, so `:tolerate` and `:max_attempts`
+> could not be tuned independently — with `max_attempts: 5` the configuration
+> above opened during the **third** failing call rather than the eleventh, and
+> raising the attempt count made a service give up *sooner*. Services that keep
+> those semantics with `circuit_breaker: [melt: :per_attempt]` still need to
+> budget in attempts: `:tolerate` as roughly *failing calls you will accept* ×
+> `:max_attempts`. The library warns when such a configuration would let a call
+> trip its own breaker part-way through its own retry loop.
 
 ## When the breaker is open
 
@@ -344,11 +350,10 @@ error rate and how costly a false trip is. Some rules of thumb:
   degraded after it has recovered.
 - Remember the breaker is global to the service. Size it for aggregate traffic,
   not a single caller.
-- Size `:tolerate` and `:within` against your *retry* settings, not
-  independently. Every failing attempt melts, so a fully-failing call spends
-  `:max_attempts` of the budget by itself — and if the retry window is wider than
-  `:within`, those melts never accumulate and the breaker never opens. The
-  [Tuning](tuning.md) guide has the rule and the measurements.
+- Leave `:within` to size itself unless you know how long a single *attempt*
+  takes. It is computed from your retry settings, and the one thing no
+  configuration states is attempt duration — which is exactly what makes a
+  hand-set window too narrow. The [Tuning](tuning.md) guide has the measurements.
 
 ## Running on more than one node
 

@@ -139,7 +139,7 @@ defmodule ExternalService.ConfigCheck do
         has to count. Its retry window is #{ms(config.window)} per call#{narrow_window_because(config)}, \
         but `within: #{within}` counts failures over a narrower span, so #{narrow_window_effect(config)}
 
-            circuit_breaker: [within: #{suggested_window(needed)}]
+            circuit_breaker: [within: #{suggested_window(config)}]
 
         Or leave `:within` unset, which sizes it from the retry options.\
         """)
@@ -251,10 +251,18 @@ defmodule ExternalService.ConfigCheck do
   # Shared with the report, so that a duration reads the same in both.
   defp ms(milliseconds), do: ExternalService.Explanation.duration(milliseconds)
 
-  # Suggested windows are rounded up to something a person would have typed.
-  defp suggested_window(needed) when needed <= 10_000, do: ":timer.seconds(10)"
+  # The trigger above is the bare minimum for the breaker to work at all; the
+  # suggestion is what `:auto` would have installed, which carries headroom for
+  # attempt time. Suggesting the bare minimum would be advice we already know is
+  # marginal.
+  defp suggested_window(config) do
+    seconds =
+      config.tolerate
+      |> ExternalService.CircuitBreaker.auto_window(config.melt, config.retry)
+      |> Kernel./(1_000)
+      |> Float.ceil()
+      |> trunc()
 
-  defp suggested_window(needed) do
-    ":timer.seconds(#{needed |> Kernel./(1_000) |> Float.ceil() |> trunc()})"
+    ":timer.seconds(#{seconds})"
   end
 end

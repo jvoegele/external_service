@@ -121,9 +121,10 @@ assert {:error, %ExternalService.RetriesExhausted{}} = result
 assert elapsed < 50_000    # three attempts, no waiting between them
 ```
 
-The generous `:tolerate` is deliberate: every failing attempt melts the breaker,
-so a test that exhausts retries can open a breaker configured with production
-numbers. See [`:tolerate` counts attempts, not calls](circuit-breakers.md#what-counts-as-a-failure).
+The generous `:tolerate` is deliberate: a test that exhausts retries melts the
+breaker once, and a suite that does it repeatedly against a shared service will
+open a breaker configured with production numbers. `ExternalService.reset_all/1`
+between tests is the other half of the answer.
 
 When you want to keep the *real* backoff configuration under test — because the
 delays are the thing you care about — override `:sleep_function` instead. It is

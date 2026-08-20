@@ -1007,15 +1007,16 @@ defmodule ExternalServiceTest do
     end
 
     test "widens for a service whose failing calls are slow" do
-      # The background-job shape: calls take ~30s, so three of them span 90s and a
-      # 10s window would never see them all.
+      # The background-job shape: calls take ~30s, so three of them span 90s at
+      # minimum — doubled, because an attempt takes time the configuration does
+      # not state. Measured: without that headroom the breaker stays closed.
       service =
         start_fuse(:"auto-slow",
           circuit_breaker: [tolerate: 3, melt: :per_call],
           retry: [max_attempts: :infinity, expiry: 30_000]
         )
 
-      assert installed_within(service) == 90_000
+      assert installed_within(service) == 180_000
     end
 
     test "scales with :tolerate, because each call melts once" do
@@ -1026,8 +1027,8 @@ defmodule ExternalServiceTest do
             retry: [base: 100, max_attempts: 8]
           )
 
-        # A 12.7s retry window per call.
-        assert installed_within(service) == 12_700 * tolerate
+        # A 12.7s retry window per call, doubled for attempt time.
+        assert installed_within(service) == 12_700 * 2 * tolerate
       end
     end
 
@@ -1040,7 +1041,7 @@ defmodule ExternalServiceTest do
           retry: [base: 500, max_attempts: 8]
         )
 
-      assert installed_within(service) == 63_500
+      assert installed_within(service) == 63_500 * 2
     end
 
     test "an explicit window is left exactly as given, wide or narrow" do

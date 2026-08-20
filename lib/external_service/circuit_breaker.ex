@@ -90,6 +90,50 @@ defmodule ExternalService.CircuitBreaker do
 
   @default_backend ExternalService.CircuitBreaker.Fuse
 
+  # The window `:auto` never goes below, and what `:within` defaulted to flatly
+  # before it.
+  @minimum_window 10_000
+
+  # Opening the breaker takes `:tolerate` + 1 failures, so they span `:tolerate`
+  # intervals — and the interval between two failing calls is a whole call, which
+  # is its retry window *plus* however long its attempts run for. Nothing in a
+  # configuration states the latter, so `:auto` doubles: it assumes attempts can
+  # cost about as much again as the backoff between them.
+  #
+  # This is measured rather than guessed at. Without the headroom, a background-job
+  # shape (`tolerate: 6`, a 2s budget per call) produced a window of exactly 12s
+  # and a breaker that stayed closed through twelve consecutive failing calls,
+  # because each call took a little over 2s and the earliest melt aged out before
+  # the last one landed. With it, the breaker opens on the 7th call as configured.
+  @attempt_headroom 2
+
+  @doc false
+  # How wide `:within` has to be for `:tolerate` failures to accumulate, given what
+  # one melt counts. Shared with `ExternalService.ConfigCheck`, so that a warning
+  # about a narrow window suggests exactly what `:auto` would have installed.
+  @spec auto_window(
+          pos_integer() | :infinity,
+          ExternalService.melt(),
+          ExternalService.RetryOptions.t()
+        ) ::
+          pos_integer()
+  def auto_window(tolerate, melt, retry_options) do
+    case ExternalService.RetryOptions.window(retry_options) do
+      # Unbounded retrying (only reachable under `:per_attempt`, since `:per_call`
+      # rejects it) has no window to size against.
+      :infinity -> @minimum_window
+      window -> max(@minimum_window, window * @attempt_headroom * melts_per_open(tolerate, melt))
+    end
+  end
+
+  # Under `:per_attempt` a single call's melts are spread across that call's own
+  # retry window, so the window has to be at least that wide for even one call's
+  # failures to accumulate. Under `:per_call` it takes `:tolerate` calls.
+  defp melts_per_open(_tolerate, :per_attempt), do: 1
+  # `tolerate: :infinity` installs no breaker at all, so there is nothing to size.
+  defp melts_per_open(:infinity, :per_call), do: 1
+  defp melts_per_open(tolerate, :per_call), do: tolerate
+
   @doc """
   Reports whether `service`'s breaker will currently admit a call.
 
