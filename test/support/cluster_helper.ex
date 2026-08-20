@@ -23,16 +23,19 @@ defmodule ExternalService.Test.ClusterHelper do
   single call can do it, and this simply stops after one.
   """
   def trip(service) do
-    Enum.reduce_while(1..20, nil, fn _attempt, _acc ->
-      if ExternalService.blown?(service) do
-        {:halt, :ok}
-      else
-        ExternalService.call(service, @retry_options, &always_retry/0)
-        {:cont, nil}
-      end
-    end)
-
+    :ok = fail_until_blown(service, 20)
     ExternalService.call(service, @retry_options, &always_retry/0)
+  end
+
+  defp fail_until_blown(_service, 0), do: :ok
+
+  defp fail_until_blown(service, remaining) do
+    if ExternalService.blown?(service) do
+      :ok
+    else
+      ExternalService.call(service, @retry_options, &always_retry/0)
+      fail_until_blown(service, remaining - 1)
+    end
   end
 
   defp always_retry, do: :retry
