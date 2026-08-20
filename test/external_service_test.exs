@@ -484,39 +484,53 @@ defmodule ExternalServiceTest do
     end
 
     test "an :expiry budget is spent but not overshot" do
+      # A 50ms budget used to cost 100ms and buy exactly one retry, because the
+      # final delay was floored at 100ms (#70). Both halves of that are asserted
+      # here, and neither through the wall clock.
+      #
+      # Elapsed time cannot separate the two behaviors reliably: 50ms-trimmed and
+      # 100ms-floored are 50ms apart, which is inside the scheduling noise of a
+      # loaded machine. This test used to assert on it and flaked twice, both times
+      # when other tests in the suite got busier rather than when anything changed.
+      #
+      # What the loop actually slept is the behavior, and it is exact. The sleep
+      # function really sleeps, because an `:expiry` is spent against the clock and
+      # a no-op would leave it unspent (#89).
+      test_process = self()
+
       service = "expiry budget service"
-      start_service(service, circuit_breaker: [tolerate: 100, within: 10_000])
+
+      start_service(service,
+        circuit_breaker: [tolerate: 100, within: 10_000],
+        sleep_function: fn milliseconds ->
+          send(test_process, {:slept, milliseconds})
+          Process.sleep(milliseconds)
+        end
+      )
+
       on_exit(fn -> ExternalService.stop(service) end)
 
       Process.put(:attempts, 0)
 
-      # This one asserts on the clock, because the clock is the behavior: a 50ms
-      # budget used to cost 100ms and buy exactly one retry, since the final delay
-      # was floored at 100ms (#70). The bounds are loose enough to survive a busy
-      # machine while still separating the two behaviors.
-      {microseconds, _result} =
-        :timer.tc(fn ->
-          ExternalService.call(service, [backoff: :exponential, base: 10, expiry: 50], fn ->
-            Process.put(:attempts, Process.get(:attempts) + 1)
-            :retry
-          end)
-        end)
+      ExternalService.call(service, [backoff: :exponential, base: 10, expiry: 50], fn ->
+        Process.put(:attempts, Process.get(:attempts) + 1)
+        :retry
+      end)
 
-      elapsed = div(microseconds, 1000)
+      slept = collect_sleeps([])
 
-      assert elapsed < 95, "a 50ms budget took #{elapsed}ms"
+      # Under the flooring this was `[100]`: one retry, costing twice the budget.
+      assert [10, 20 | rest] = slept
+      assert rest != [], "the budget bought only #{length(slept)} delays"
+      assert Enum.sum(slept) <= 50, "a 50ms budget slept for #{Enum.sum(slept)}ms"
+      assert Process.get(:attempts) == length(slept) + 1
 
-      # How many attempts the budget buys is pinned without a clock, because
-      # measuring it from a real call is load-sensitive: a scheduler delay eats
-      # the budget and trims the sequence early. Under the pre-#70 flooring this
-      # sequence was `[100]` — one retry, costing twice the budget.
+      # The trailing delay is whatever is left of the budget when it is asked for,
+      # so load can shrink it but never grow it.
       assert [backoff: :exponential, base: 10, expiry: 50]
              |> RetryOptions.new()
              |> ExternalService.Retry.plan()
              |> Enum.to_list() == [10, 20, 20]
-
-      assert Process.get(:attempts) >= 2,
-             "the budget bought only #{Process.get(:attempts)} attempts"
     end
 
     test "calls the sleep function for retry backoff, without waiting" do
@@ -1546,6 +1560,14 @@ defmodule ExternalServiceTest do
   # Trips a service's circuit breaker by melting it past its configured tolerance.
   defp blow_fuse(name) do
     ExternalService.call(name, %RetryOptions{backoff: :linear, base: 0}, fn -> :retry end)
+  end
+
+  defp collect_sleeps(collected) do
+    receive do
+      {:slept, milliseconds} -> collect_sleeps([milliseconds | collected])
+    after
+      0 -> Enum.reverse(collected)
+    end
   end
 
   # Starts a service with a high failure tolerance (so it won't blow) unless
