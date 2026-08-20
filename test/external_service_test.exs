@@ -1032,12 +1032,24 @@ defmodule ExternalServiceTest do
       end
     end
 
-    test "under :per_attempt it is one call's own retry window, not :tolerate of them" do
-      # Per-attempt melting spreads a single call's melts across that call's retry
-      # window, so the window only has to be that wide for them to accumulate.
+    test "under :per_attempt it counts how many calls produce the melt budget" do
+      # Per-attempt melting spreads a call's melts across that call's retry window,
+      # but eleven melts at eight per call still takes two calls — so the window has
+      # to span both. Issue #112: this used to size for one call and left a breaker
+      # that stayed closed through 75 seconds of total failure.
       service =
         start_fuse(:"auto-per-attempt",
           circuit_breaker: [tolerate: 10, melt: :per_attempt],
+          retry: [base: 500, max_attempts: 8]
+        )
+
+      assert installed_within(service) == 63_500 * 2 * 2
+    end
+
+    test "under :per_attempt one call that melts the whole budget needs only its own window" do
+      service =
+        start_fuse(:"auto-per-attempt-one-call",
+          circuit_breaker: [tolerate: 3, melt: :per_attempt],
           retry: [base: 500, max_attempts: 8]
         )
 

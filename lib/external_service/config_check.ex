@@ -17,6 +17,7 @@ defmodule ExternalService.ConfigCheck do
   # and for child-spec overrides, which are runtime values no compile-time check
   # can see.
 
+  alias ExternalService.CircuitBreaker
   alias ExternalService.RetryOptions
 
   require Logger
@@ -118,26 +119,33 @@ defmodule ExternalService.ConfigCheck do
   # inside it. `:auto` sizes itself (and is the default), so this is only for a
   # window someone set by hand.
   #
-  # Note what this can and cannot claim. Under `:per_attempt` it is a proof: a
-  # single call's melts are spread across its own retry window, so a narrower
-  # window cannot accumulate even one call's worth. Under `:per_call` it is a
-  # heuristic — opening the breaker takes several calls, and how fast those arrive
-  # is traffic rather than configuration. Sequential callers cannot open it;
-  # concurrent ones can. The message says so rather than overclaiming.
+  # The threshold is `CircuitBreaker.minimum_window/3` — the same arithmetic
+  # `:auto` uses, minus its headroom. Sharing it is not tidiness: while this
+  # module computed its own threshold, a `:per_attempt` configuration could pass
+  # the check and still be installed with a window `:auto` had under-sized, and
+  # both were wrong in the same way for the same reason (issue #112).
+  #
+  # Note what this can and cannot claim. When one failing call produces the whole
+  # melt budget by itself, it is a proof: a narrower window cannot accumulate even
+  # that one call's worth. When it takes several calls, it is a heuristic — how
+  # fast those arrive is traffic rather than configuration. The message says which.
   defp narrow_window(%{within: :auto}), do: []
   defp narrow_window(%{window: :infinity}), do: []
   defp narrow_window(%{window: 0}), do: []
   defp narrow_window(%{tolerate: :infinity}), do: []
 
   defp narrow_window(%{within: within} = config) when is_integer(within) do
-    needed = needed_window(config)
+    needed = CircuitBreaker.minimum_window(config.tolerate, config.melt, config.retry)
+    calls = CircuitBreaker.calls_to_open(config.tolerate, config.melt, config.retry)
 
     if within < needed do
       [
         finding(:narrow_window, """
         #{inspect(config.service)} has a circuit breaker window narrower than the failures it \
-        has to count. Its retry window is #{ms(config.window)} per call#{narrow_window_because(config)}, \
-        but `within: #{within}` counts failures over a narrower span, so #{narrow_window_effect(config)}
+        has to count. Its retry window is #{ms(config.window)} per call, and \
+        #{melt_source(config, calls)} — so the failures that would open it are spread over about \
+        #{ms(needed)}, wider than the #{ms(within)} that `within: #{within}` counts over.\
+        #{traffic_caveat(calls)}
 
             circuit_breaker: [within: #{suggested_window(config)}]
 
@@ -151,23 +159,27 @@ defmodule ExternalService.ConfigCheck do
 
   defp narrow_window(_config), do: []
 
-  defp needed_window(%{melt: :per_attempt, window: window}), do: window
+  defp melt_source(%{melt: :per_call, tolerate: tolerate}, _calls),
+    do: "it takes #{tolerate + 1} failing calls to open the breaker, at one melt each"
 
-  defp needed_window(%{melt: :per_call, window: window, tolerate: tolerate}),
-    do: window * tolerate
-
-  defp narrow_window_because(%{melt: :per_attempt}), do: ", across which that call's melts land"
-
-  defp narrow_window_because(%{melt: :per_call, tolerate: tolerate}),
-    do: ", and it takes #{tolerate} failing calls to open the breaker"
-
-  defp narrow_window_effect(%{melt: :per_attempt, tolerate: tolerate}),
-    do: "a call's melts never accumulate to the #{tolerate} it tolerates."
-
-  defp narrow_window_effect(%{melt: :per_call}),
+  defp melt_source(%{melt: :per_attempt, tolerate: tolerate, retry: retry}, 1),
     do:
-      "a caller making these calls one after another never opens it. " <>
-        "Concurrent callers still can, so this is a question of your traffic rather than a certainty."
+      "one failing call melts it up to #{inspect(retry.max_attempts)} times, enough for the " <>
+        "#{tolerate + 1} that open it"
+
+  defp melt_source(%{melt: :per_attempt, tolerate: tolerate, retry: retry}, calls),
+    do:
+      "it takes #{calls} failing calls to reach the #{tolerate + 1} melts that open the " <>
+        "breaker, at up to #{inspect(retry.max_attempts)} per call"
+
+  # A single call producing the whole budget is a proof; anything else depends on
+  # how fast calls arrive, which is not in the configuration.
+  defp traffic_caveat(1), do: ""
+
+  defp traffic_caveat(_calls),
+    do:
+      " A caller making these calls one after another never opens it; concurrent callers " <>
+        "still can, so this is a question of your traffic rather than a certainty."
 
   # Under `:per_attempt` a call's own melts can exceed the breaker's whole budget,
   # so the first failing call opens the breaker part-way through its own retry loop
