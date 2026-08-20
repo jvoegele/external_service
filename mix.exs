@@ -56,6 +56,11 @@ defmodule ExternalService.Mixfile do
       {:hammer, "~> 7.0", only: :test},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      # Property-based tests only, and only for sequences — orderings of events over
+      # time, which the exhaustive grids elsewhere in the suite cannot enumerate.
+      # `only: [:dev, :test]` rather than `optional: true`: this library does not
+      # ship generators, so nothing downstream ever needs it.
+      {:stream_data, "~> 1.0", only: [:dev, :test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
