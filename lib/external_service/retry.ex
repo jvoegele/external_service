@@ -170,16 +170,53 @@ defmodule ExternalService.Retry do
   per retry, so an `n`-element stream means at most `n + 1` attempts.
 
   `call/3` sleeps for each element in turn and stops when the stream is exhausted.
-  This is the seam the delay behavior is tested through: the sequence can be
-  inspected without waiting for it.
+
+  This stream is tied to the clock: with an `:expiry` set, what is left of the
+  budget is measured against `System.monotonic_time/1`, and it is `call/3`
+  *sleeping* each delay that keeps the clock advancing in step with the sequence.
+  Enumerating it without sleeping decouples the two, so it answers a question
+  nobody asked — see `plan/1`, which is the one to inspect.
   """
   @spec delay_stream(RetryOptions.t()) :: Enumerable.t()
   def delay_stream(%RetryOptions{} = retry_opts) do
+    build(retry_opts, monotonic_budget())
+  end
+
+  @doc """
+  The delays these options *plan* to use, without a clock and without waiting.
+
+  Identical to `delay_stream/1` except that the `:expiry` budget is spent against
+  the delays themselves rather than against elapsed time — which is exactly what
+  the real clock does once `call/3` sleeps them. The trimming rule is shared, so
+  the two cannot drift.
+
+  This is what to enumerate to answer "what would this configuration do":
+
+      iex> ExternalService.RetryOptions.new(base: 10, expiry: 1000, max_attempts: :infinity)
+      ...> |> ExternalService.Retry.plan()
+      ...> |> Enum.to_list()
+      [10, 20, 40, 80, 160, 320, 370]
+
+  The same options through `delay_stream/1` block for the whole budget and yield a
+  sequence that depends on how fast the machine drew it.
+
+  One configuration plans an unbounded number of attempts: a `:base` of `0` with
+  no `:max_attempts` bound never spends its budget, so the plan is an infinite
+  stream of zeros. That is honest rather than evasive — how many zero-delay
+  attempts fit in a time budget is a property of the machine, not of the
+  configuration. Bound it as you would any other infinite stream here.
+  """
+  @spec plan(RetryOptions.t()) :: Enumerable.t()
+  def plan(%RetryOptions{} = retry_opts) do
+    build(retry_opts, virtual_budget())
+  end
+
+  defp build(%RetryOptions{} = retry_opts, budget) do
     retry_opts
     |> backoff_stream()
     |> apply_jitter(retry_opts.jitter)
     |> apply_cap(retry_opts.cap)
-    |> apply_expiry(retry_opts.expiry)
+    |> apply_expiry(retry_opts.expiry, budget)
     |> apply_max_attempts(retry_opts.max_attempts)
   end
 
@@ -236,14 +273,14 @@ defmodule ExternalService.Retry do
   # Both bounds distinguish `nil` (never set) from `:infinity` (explicitly
   # unbounded) so that `start/2` can warn about the former, but the two behave
   # identically here: neither limits the delay stream.
-  defp apply_expiry(stream, unbounded) when unbounded in [nil, :infinity], do: stream
+  defp apply_expiry(stream, unbounded, _budget) when unbounded in [nil, :infinity], do: stream
 
-  defp apply_expiry(stream, expiry) do
+  defp apply_expiry(stream, expiry, budget) do
     Stream.resource(
-      fn -> {stream, now_ms() + expiry} end,
+      fn -> {stream, budget.open.(expiry)} end,
       fn
         :at_end -> {:halt, :at_end}
-        {remaining, deadline} -> next_delay_within(remaining, deadline)
+        {remaining, held} -> next_delay_within(remaining, held, budget)
       end,
       fn _ -> :ok end
     )
@@ -262,15 +299,19 @@ defmodule ExternalService.Retry do
   # delay that would overshoot abandons most of the budget under exponential
   # backoff — 630ms of a 1000ms budget, 2550ms of 5000ms — because the delay that
   # does not fit is roughly as large as everything before it combined.
-  defp next_delay_within(remaining, deadline) do
+  #
+  # This rule is the whole of `:expiry`, and it is deliberately written once. What
+  # `delay_stream/1` and `plan/1` disagree about is only how much of the budget is
+  # left, never what to do about it.
+  defp next_delay_within(remaining, held, budget) do
     case Enum.take(remaining, 1) do
       [preferred] ->
-        left = deadline - now_ms()
+        left = budget.left.(held)
 
         cond do
           left <= 0 -> {:halt, :at_end}
           preferred >= left -> {[left], :at_end}
-          true -> {[preferred], {Stream.drop(remaining, 1), deadline}}
+          true -> {[preferred], {Stream.drop(remaining, 1), budget.spend.(held, preferred)}}
         end
 
       [] ->
@@ -278,8 +319,32 @@ defmodule ExternalService.Retry do
     end
   end
 
+  # The two ways of holding a time budget, and the only thing the live stream and
+  # the plan disagree about.
+  #
+  # The live budget is a deadline that the world moves toward on its own, so
+  # spending a delay is a no-op: what makes the clock advance is `call/3` sleeping.
   # Monotonic rather than system time, so that a clock adjustment mid-call cannot
   # stretch or collapse a retry budget.
+  defp monotonic_budget do
+    %{
+      open: fn expiry -> now_ms() + expiry end,
+      left: fn deadline -> deadline - now_ms() end,
+      spend: fn deadline, _delay -> deadline end
+    }
+  end
+
+  # The planning budget is the remaining milliseconds themselves, drawn down by
+  # each delay yielded — which is what the deadline above measures once those
+  # delays have actually been slept.
+  defp virtual_budget do
+    %{
+      open: fn expiry -> expiry end,
+      left: fn remaining -> remaining end,
+      spend: fn remaining, delay -> remaining - delay end
+    }
+  end
+
   defp now_ms, do: System.monotonic_time(:millisecond)
 
   # `max_attempts` counts the initial attempt plus retries, so the delay stream

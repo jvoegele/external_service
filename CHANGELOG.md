@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+- **Internal: a retry configuration with an `:expiry` can now be inspected without
+  waiting out its budget** ([issue #89](https://github.com/jvoegele/external_service/issues/89)).
+  The delay sequence measures what is left of the budget against the monotonic
+  clock, and it is the retry loop *sleeping* each delay that keeps the clock
+  advancing in step with it. Drawing the sequence without sleeping decoupled the
+  two, so `base: 500, cap: 5_000, expiry: 30_000, max_attempts: :infinity` took 25
+  seconds to yield 2400 delays totalling 3.3 hours. A planning path now spends the
+  budget against the delays themselves — the same trimming rule, written once —
+  and answers the same configuration in microseconds with a sequence that totals
+  the budget exactly. No change to what a real call does.
+
 ### Changed
 - **Internal: extracted an ExternalService.Retry module**, so that retrying is owned by one
   module the way the circuit breaker, rate limiter and concurrency limit each are

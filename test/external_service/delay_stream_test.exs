@@ -4,6 +4,8 @@ defmodule ExternalService.DelayStreamTest do
   alias ExternalService.Retry
   alias ExternalService.RetryOptions
 
+  doctest ExternalService.Retry
+
   # Characterization tests for the delays the retry loop actually sleeps for.
   #
   # These exist to make replacing the ElixirRetry dependency (issue #69) a
@@ -125,6 +127,74 @@ defmodule ExternalService.DelayStreamTest do
       unbounded = delays([backoff: :exponential, base: 10], 3)
 
       assert delays([backoff: :exponential, base: 10, expiry: :infinity], 3) == unbounded
+    end
+  end
+
+  describe "plan/1" do
+    # `delay_stream/1` measures what is left of an `:expiry` budget against the
+    # clock, and it is `call/3` sleeping each delay that keeps the clock advancing
+    # in step with the sequence. Enumerating it without sleeping decouples the two:
+    # the deadline barely moves, so the stream keeps yielding. `plan/1` spends the
+    # budget against the delays themselves instead, which is what the clock does
+    # once they have actually been slept.
+    #
+    # These are exact where the `:expiry` tests above can only assert bounds —
+    # that is the point of the function.
+
+    defp plan(opts),
+      do: opts |> unbounded() |> RetryOptions.new() |> Retry.plan() |> Enum.to_list()
+
+    test "spends the budget exactly, trimming the delay that would overshoot" do
+      result = plan(backoff: :exponential, base: 10, expiry: 1000)
+
+      assert result == [10, 20, 40, 80, 160, 320, 370]
+      assert Enum.sum(result) == 1000
+    end
+
+    test "a budget smaller than the first delay is honored rather than rounded up" do
+      assert plan(backoff: :exponential, base: 10, expiry: 5) == [5]
+      assert plan(backoff: :exponential, base: 10, expiry: 1) == [1]
+    end
+
+    test "does not wait out the budget it is describing" do
+      # This is issue #89. The same options through `delay_stream/1` block for the
+      # whole 30-second budget and yield ~2400 delays summing to about 3.3 hours,
+      # because the deadline barely moves while nothing sleeps.
+      {microseconds, result} =
+        :timer.tc(fn ->
+          plan(backoff: :exponential, base: 500, cap: 5000, expiry: 30_000)
+        end)
+
+      assert result == [500, 1000, 2000, 4000, 5000, 5000, 5000, 5000, 2500]
+      assert Enum.sum(result) == 30_000
+      # Generous by four orders of magnitude — it plans in single-digit
+      # microseconds — while still failing loudly if this ever waits again.
+      assert microseconds < 1_000_000
+    end
+
+    test "agrees with delay_stream/1 when no budget is set" do
+      opts = [backoff: :exponential, base: 10, cap: 400, max_attempts: 6]
+
+      assert plan(opts) == all_delays(opts)
+    end
+
+    test "counts against :max_attempts as the live stream does" do
+      assert [] == plan(backoff: :exponential, base: 10, expiry: 1000, max_attempts: 1)
+
+      assert [10, 20, 40] ==
+               plan(backoff: :exponential, base: 10, expiry: 1000, max_attempts: 4)
+    end
+
+    test "a zero base with no attempt bound plans an unbounded number of attempts" do
+      # A budget that is never spent cannot end the stream, and how many zero-delay
+      # attempts fit in a time budget is a property of the machine rather than of
+      # the configuration. The plan says so by being infinite rather than guessing.
+      stream =
+        [backoff: :exponential, base: 0, expiry: 1000, max_attempts: :infinity]
+        |> RetryOptions.new()
+        |> Retry.plan()
+
+      assert Enum.take(stream, 5) == [0, 0, 0, 0, 0]
     end
   end
 
