@@ -49,6 +49,34 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   observable.
 
 ### Added
+- **`ExternalService.explain/1`** — a report of what a configuration will do
+  ([issue #90](https://github.com/jvoegele/external_service/issues/90)). Takes
+  either a started service or a keyword list, so a configuration can be examined
+  before it ships as well as during an incident:
+
+      IO.puts ExternalService.explain(MyApp.Stripe)
+
+      MyApp.Stripe
+
+        retry
+          window       1.5s
+          delays       100ms, 200ms, 400ms, 800ms
+          attempts     up to 5
+          time budget  none (:expiry unset)
+
+        circuit breaker
+          opens after      4 failing calls
+          counting window  10s
+          resets after     60s
+          backend          ExternalService.CircuitBreaker.Fuse
+        ...
+
+  Every line is derived from the options rather than measured, which is what the
+  rest of this release makes possible: before it, most of this report would have
+  had to say "it depends". A started service reports the options it is actually
+  running with, including child-spec overrides and the resolved `:within`, and any
+  configuration warnings appear in the report itself.
+
 - **Configurations are now checked against each other**, at compile time for
   services declared with `use ExternalService` and at start time for everything
   else ([issue #91](https://github.com/jvoegele/external_service/issues/91)).

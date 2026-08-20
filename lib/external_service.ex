@@ -63,6 +63,7 @@ defmodule ExternalService do
   alias ExternalService.CircuitBreakerOpen
   alias ExternalService.Concurrency
   alias ExternalService.ConfigCheck
+  alias ExternalService.Explanation
   alias ExternalService.RateLimited
   alias ExternalService.RateLimiter
   alias ExternalService.RetriesExhausted
@@ -295,7 +296,8 @@ defmodule ExternalService do
       :rate_limit,
       :concurrency,
       :retry_options,
-      :sleep
+      :sleep,
+      :options
     ]
 
     @type t :: %__MODULE__{
@@ -305,20 +307,16 @@ defmodule ExternalService do
             rate_limit: ExternalService.RateLimiter.t(),
             concurrency: ExternalService.Concurrency.t(),
             retry_options: ExternalService.RetryOptions.t(),
-            sleep: ExternalService.sleep_function()
+            sleep: ExternalService.sleep_function(),
+            # The options this service was actually started with, after validation
+            # and after `:within` has been resolved — what `ExternalService.explain/1`
+            # reports, and the only backend-agnostic record of them. A breaker
+            # backend's config is opaque by design, so `:tolerate` cannot be read
+            # back out of it.
+            options: keyword()
           }
 
-    def init(service, circuit_breaker, melt, rate_limit, concurrency, retry_options, sleep) do
-      state = %__MODULE__{
-        service: service,
-        circuit_breaker: circuit_breaker,
-        melt: melt,
-        rate_limit: rate_limit,
-        concurrency: concurrency,
-        retry_options: retry_options,
-        sleep: sleep
-      }
-
+    def put(%__MODULE__{service: service} = state) do
       :persistent_term.put(key(service), state)
       state
     end
@@ -380,9 +378,8 @@ defmodule ExternalService do
     # only place that sees what a service is finally started with.
     ConfigCheck.report(service, options)
 
+    options = resolve_breaker_options(service, options)
     {melt, breaker_options} = Keyword.pop!(options[:circuit_breaker], :melt)
-    validate_melt_bound!(service, melt, options[:retry])
-    breaker_options = resolve_within(breaker_options, melt, options[:retry])
 
     circuit_breaker = CircuitBreaker.install(service, breaker_options)
 
@@ -404,7 +401,17 @@ defmodule ExternalService do
 
     sleep = Keyword.get(options, :sleep_function, &Process.sleep/1)
 
-    State.init(service, circuit_breaker, melt, rate_limit, concurrency, retry_options, sleep)
+    State.put(%State{
+      service: service,
+      circuit_breaker: circuit_breaker,
+      melt: melt,
+      rate_limit: rate_limit,
+      concurrency: concurrency,
+      retry_options: retry_options,
+      sleep: sleep,
+      options: options
+    })
+
     :ok
   end
 
@@ -436,6 +443,22 @@ defmodule ExternalService do
     end
 
     NimbleOptions.validate!(options, @start_schema)
+  end
+
+  # Everything that turns written options into the options a service actually runs
+  # with: the bound `:per_call` requires, and `:within` when it sizes itself.
+  # Shared with `explain/1`, so that a report describes the numbers that would be
+  # installed rather than the symbols that were written.
+  defp resolve_breaker_options(service, options) do
+    {melt, breaker_options} = Keyword.pop!(options[:circuit_breaker], :melt)
+    validate_melt_bound!(service, melt, options[:retry])
+
+    breaker_options =
+      breaker_options
+      |> resolve_within(melt, options[:retry])
+      |> Keyword.put(:melt, melt)
+
+    Keyword.put(options, :circuit_breaker, breaker_options)
   end
 
   # `:within` has to be wide enough for `:tolerate` failures to land inside it, and
@@ -547,6 +570,73 @@ defmodule ExternalService do
     end
 
     :ok
+  end
+
+  @doc """
+  Describes what a configuration will do, as a report meant to be read.
+
+      IO.puts ExternalService.explain(MyApp.Stripe)
+
+  Takes either a started service or a keyword list of options, so a configuration
+  can be examined before it ships as well as after:
+
+      IO.puts ExternalService.explain(
+        circuit_breaker: [tolerate: 3],
+        retry: [base: 100, max_attempts: 5]
+      )
+
+  Everything in the report is derived from the options rather than measured, and
+  the checks described above are included in it, so this is also the way to see why
+  a service warned at compile time.
+
+  ## Example
+
+      :payments
+
+        retry
+          window       1.5s
+          delays       100ms, 200ms, 400ms, 800ms
+          attempts     up to 5
+          time budget  none (:expiry unset)
+
+        circuit breaker
+          opens after      4 failing calls
+          counting window  10.0s
+          resets after     60.0s
+          backend          ExternalService.CircuitBreaker.Fuse
+
+        rate limit
+          none  calls are not throttled
+
+        concurrency
+          none  calls are not limited in flight
+
+        a fully-failing call
+          spends  1.5s waiting between attempts
+          plus    however long its 5 attempts take — nothing here bounds a single attempt
+
+  Note that a keyword list is always read as options. A service identified by a
+  list has to be explained through the started-service path, which means starting
+  it first.
+  """
+  @spec explain(service() | keyword()) :: String.t()
+  def explain(service_or_options)
+
+  def explain(options) when is_list(options) do
+    service = Keyword.get(options, :name, "this configuration")
+
+    options
+    |> Keyword.delete(:name)
+    |> then(&validate!(service, &1))
+    |> then(&resolve_breaker_options(service, &1))
+    |> then(&Explanation.render(service, &1))
+  end
+
+  def explain(service) do
+    case State.fetch(service) do
+      {:ok, %State{options: options}} -> Explanation.render(service, options)
+      :error -> service_not_started_message(service)
+    end
   end
 
   @doc """
