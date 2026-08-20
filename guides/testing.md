@@ -21,6 +21,41 @@ A service is not a process you start per test. Its configuration lives in
 
 Everything below follows from this.
 
+## Asserting that your configuration works
+
+The tests above check that a *call* behaves. `ExternalService.simulate/3` checks
+that the *configuration* behaves — that the breaker opens, that it opens soon
+enough, and that a dead dependency does not absorb more load than you meant it to:
+
+```elixir
+test "our payments breaker actually opens, and fast enough" do
+  assert %ExternalService.Simulation{opens_after: opens, worst_call: worst, attempts: attempts} =
+           ExternalService.simulate(MyApp.Payments, :always_failing)
+
+  assert opens <= 5
+  assert worst < 2_000
+  assert attempts <= 25
+end
+```
+
+It runs on a virtual clock, so a configuration that would take two minutes of real
+failure to trip is simulated in microseconds. Nothing sleeps and no service is
+started.
+
+The scenario worth adding once you know your dependency is that a slow one is not
+the same as a failing one:
+
+```elixir
+# Attempts that succeed but take five seconds each. The breaker never opens —
+# nothing is failing — so :worst_call is the number that matters.
+assert %ExternalService.Simulation{worst_call: worst} =
+         ExternalService.simulate(MyApp.Payments, {:slow, 5_000})
+```
+
+Attempt duration is the one thing a configuration cannot state, and the thing that
+makes a hand-sized `:within` too narrow. `{:always_failing, attempt_ms}` is how to
+find out what your configuration does when attempts are slow *and* failing.
+
 ## Isolating tests from each other
 
 The cleanest fix is to give each test its own service term. Service terms are

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **`ExternalService.simulate/3`** — runs a configuration against a failing
+  dependency on a virtual clock and reports what happened
+  ([issue #94](https://github.com/jvoegele/external_service/issues/94)).
+  `explain/1` says what a configuration *is*; this says what it *does*, and makes
+  it assertable:
+
+      test "our breaker actually opens, and fast enough" do
+        assert %ExternalService.Simulation{opens_after: opens, worst_call: worst} =
+                 ExternalService.simulate(MyApp.Stripe, :always_failing)
+
+        assert opens <= 5
+        assert worst < 2_000
+      end
+
+  Simulating half an hour of a background job costs microseconds: nothing sleeps
+  and no service is started. Scenarios cover a dependency that always fails, one
+  that is slow, one that recovers, and one that fails intermittently — including
+  `{:always_failing, attempt_ms}`, which is how to see what a configuration does
+  when attempts are slow as well as failing, the one thing no configuration
+  states.
+
+  The only thing modelled rather than executed is the circuit breaker's sliding
+  failure window. That model is pinned against six behaviors measured from real
+  services, including a configuration that stays closed through twelve
+  consecutive fully-failing calls.
+
 ## [3.0.0-rc.2] - 2026-08-20
 
 rc.2 is about the *interplay* between the mechanisms rather than any one of them.

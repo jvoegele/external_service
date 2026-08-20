@@ -128,6 +128,23 @@ MyApp.Api.reset()        # force closed
 ExternalService.all_available?([:a, :b])
 ```
 
+### Understand a configuration
+
+```elixir
+# what will this do?
+IO.puts ExternalService.explain(MyApp.Api)
+
+# does the breaker actually open? (virtual clock, nothing sleeps)
+ExternalService.simulate(MyApp.Api, :always_failing)
+#=> %Simulation{opens_after: 4, worst_call: 1500, attempts: 20, ...}
+
+# how long does a fully-failing call wait?
+ExternalService.RetryOptions.window(base: 100, max_attempts: 5)   #=> 1500
+```
+
+Both take a proposed keyword list too, so you can try a configuration before
+shipping it.
+
 ### Drive it directly
 
 ```elixir
