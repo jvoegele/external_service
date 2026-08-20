@@ -7,31 +7,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [3.0.0-rc.3] - 2026-08-20
+
+rc.2 made a configuration behave predictably. rc.3 is about finding out whether it
+is behaving — two additions, no breaking changes, and nothing to migrate.
+
+Between them they cover the two halves of that question. `simulate/3` answers it
+from the configuration, before anything ships and inside a test.
+`ExternalService.Insights` answers it from what is actually happening, which is
+the only place the missing variable — how long a single attempt takes — ever shows
+up.
+
 ### Added
-- **`ExternalService.Insights`** — an opt-in telemetry handler that reports when a
-  configuration has stopped doing what it was set up to do
-  ([issue #95](https://github.com/jvoegele/external_service/issues/95)).
-
-      ExternalService.Insights.attach()
-
-  `explain/1` and `simulate/3` answer questions about a configuration from the
-  configuration. This answers the one they cannot: whether what is *happening*
-  matches it. The gap between the two is attempt duration, which nothing in a
-  configuration states — so a breaker sized correctly on the day it was written
-  goes quietly inert when the dependency slows down, and the symptom is a service
-  failing every call with its breaker still closed.
-
-  Three findings, each naming the setting to change and a value to try: a breaker
-  that has absorbed more consecutive failures than it tolerates and is still
-  closed; calls taking much longer than their backoff accounts for; and traffic
-  that is succeeding only because retries are absorbing a fault, which the circuit
-  breaker deliberately cannot see.
-
-  Off by default and free until attached. Attached, it costs a fixed dozen
-  integers per service updated without locks, starts no process, and logs at most
-  once per service per interval. `ExternalService.Insights.report/1` returns the
-  same findings as data.
-
 - **`ExternalService.simulate/3`** — runs a configuration against a failing
   dependency on a virtual clock and reports what happened
   ([issue #94](https://github.com/jvoegele/external_service/issues/94)).
@@ -57,6 +44,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   failure window. That model is pinned against six behaviors measured from real
   services, including a configuration that stays closed through twelve
   consecutive fully-failing calls.
+
+- **`ExternalService.Insights`** — an opt-in telemetry handler that reports when a
+  configuration has stopped doing what it was set up to do
+  ([issue #95](https://github.com/jvoegele/external_service/issues/95)).
+
+      ExternalService.Insights.attach()
+
+  `explain/1` and `simulate/3` answer questions about a configuration from the
+  configuration. This answers the one they cannot: whether what is *happening*
+  matches it. The gap between the two is attempt duration, which nothing in a
+  configuration states — so a breaker sized correctly on the day it was written
+  goes quietly inert when the dependency slows down, and the symptom is a service
+  failing every call with its breaker still closed.
+
+  Three findings, each naming the setting to change and a value to try: a breaker
+  that has absorbed more consecutive failures than it tolerates and is still
+  closed; calls taking much longer than their backoff accounts for; and traffic
+  that is succeeding only because retries are absorbing a fault, which the circuit
+  breaker deliberately cannot see.
+
+  Off by default and free until attached. Attached, it costs a fixed dozen
+  integers per service updated without locks, starts no process, and logs at most
+  once per service per interval. `ExternalService.Insights.report/1` returns the
+  same findings as data.
 
 ## [3.0.0-rc.2] - 2026-08-20
 
@@ -1103,7 +1114,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.2...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.3...HEAD
+[3.0.0-rc.3]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.2...3.0.0-rc.3
 [3.0.0-rc.2]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.1...3.0.0-rc.2
 [3.0.0-rc.1]: https://github.com/jvoegele/external_service/compare/2.8.0...3.0.0-rc.1
 [2.8.0]: https://github.com/jvoegele/external_service/compare/2.7.0...2.8.0
