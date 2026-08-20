@@ -67,6 +67,25 @@ defmodule ExternalService.BackendTest do
       assert {:error, %ExternalService.RetriesExhausted{}} =
                ExternalService.call(service, fn -> {:retry, :nope} end)
 
+      # One melt for the call, under the default `melt: :per_call` — the three
+      # attempts are the retry mechanism's business, not the breaker's.
+      assert Enum.count(StubBreaker.call_names(), &(&1 == :melt)) == 1
+    end
+
+    test "melt: :per_attempt charges the configured backend once per attempt" do
+      service = unique_service()
+
+      :ok =
+        ExternalService.start(service,
+          circuit_breaker: [backend: StubBreaker, melt: :per_attempt],
+          retry: [max_attempts: 3, base: 1]
+        )
+
+      on_exit(fn -> ExternalService.stop(service) end)
+
+      assert {:error, %ExternalService.RetriesExhausted{}} =
+               ExternalService.call(service, fn -> {:retry, :nope} end)
+
       assert Enum.count(StubBreaker.call_names(), &(&1 == :melt)) == 3
     end
 

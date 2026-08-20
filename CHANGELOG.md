@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+- **The circuit breaker's `:tolerate` now counts failing calls, not failing
+  attempts** — a breaking change
+  ([issue #93](https://github.com/jvoegele/external_service/issues/93)).
+  A call melts the breaker once, when its retrying gives up, rather than once per
+  failing attempt. `tolerate: 3` means three dead calls, whatever `:max_attempts`
+  is.
+
+  This removes the two couplings that `guides/tuning.md` exists to warn about.
+  `:tolerate` and `:max_attempts` could not previously be tuned independently:
+  raising the attempt count made the breaker open *sooner*, because each call
+  spent more of its budget — and with `tolerate: 5, max_attempts: 8` the very
+  first call melted the breaker five times inside its own retry loop and had its
+  remaining attempts rejected by the breaker it had just opened. A call's melts
+  were also spread across its whole retry window, so `:within` had to be wider
+  than that window or they never accumulated at all.
+
+  Three consequences worth reading before upgrading, all covered in the
+  [migration guide](guides/migrating-to-3.0.md):
+
+  - **Divide your `:tolerate` by the `:max_attempts` it was sized against.** Left
+    alone it now means that many *calls*, so the breaker opens later than
+    intended — silently, and in the dangerous direction.
+  - **`:within` may need to be wider.** Melts now arrive one per call rather than
+    several per call, so the window has to span the interval across which
+    `:tolerate` failing calls arrive. Slow services need a wider window than
+    before, not a narrower one.
+  - **Unbounded retrying now needs a time budget.** A call that never gives up
+    never melts, so `max_attempts: :infinity` with no `:expiry` would retry
+    forever with nothing to stop it. That combination now raises, at `start/2`
+    and at any `call/3` that overrides its way into it.
+
+  `circuit_breaker: [melt: :per_attempt]` restores the pre-3.0 semantics in full,
+  including the breaker acting as the backstop for an unbounded retry loop.
+
+  A call that fails some attempts and then succeeds no longer melts at all.
+  Retries did their job, and a breaker that opened on it would convert working
+  calls into errors. `[:external_service, :call, :retry]` telemetry still fires
+  per attempt under both settings, so degraded-but-succeeding traffic remains
+  observable.
+
 ### Added
 - **`ExternalService.RetryOptions.window/1`** — the total time a fully-failing call
   spends waiting between attempts, for a set of retry options

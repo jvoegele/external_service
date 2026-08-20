@@ -30,6 +30,13 @@ defmodule ExternalServiceTest do
   # retrying not to stop first, so they opt out of the `:max_attempts` default of
   # 5 — which is exactly the migration an application relying on unbounded
   # retrying has to make.
+  #
+  # "Until the circuit breaker opens" is per-attempt melt semantics by definition:
+  # only a breaker that counts attempts can halt a single unbounded call. So the
+  # services in this file are started with `melt: :per_attempt` (see
+  # `start_service/2`), and this file is the regression net for that mode. The
+  # 3.0 default, `melt: :per_call`, has its own describe block below and is
+  # exercised throughout the rest of the suite.
   @retry_opts %RetryOptions{
     backoff: :linear,
     base: 0,
@@ -67,7 +74,7 @@ defmodule ExternalServiceTest do
 
   describe "start" do
     test "installs a fuse" do
-      ExternalService.start(@fuse_name)
+      start_service(@fuse_name)
       assert :fuse.ask(@fuse_name, :sync) == :ok
     end
 
@@ -135,7 +142,7 @@ defmodule ExternalServiceTest do
     test "removes a fuse" do
       # Start the fuse here rather than relying on another test having installed
       # it first; ExUnit randomizes test order, so this test must be independent.
-      ExternalService.start(@fuse_name)
+      start_service(@fuse_name)
       assert :fuse.ask(@fuse_name, :sync) == :ok
 
       ExternalService.stop(@fuse_name)
@@ -149,7 +156,7 @@ defmodule ExternalServiceTest do
     setup do
       Process.put(@fuse_name, 0)
 
-      ExternalService.start(@fuse_name,
+      start_service(@fuse_name,
         circuit_breaker: [tolerate: @fuse_retries, within: 10_000]
       )
     end
@@ -478,7 +485,7 @@ defmodule ExternalServiceTest do
 
     test "an :expiry budget is spent but not overshot" do
       service = "expiry budget service"
-      ExternalService.start(service, circuit_breaker: [tolerate: 100, within: 10_000])
+      start_service(service, circuit_breaker: [tolerate: 100, within: 10_000])
       on_exit(fn -> ExternalService.stop(service) end)
 
       Process.put(:attempts, 0)
@@ -499,7 +506,16 @@ defmodule ExternalServiceTest do
 
       assert elapsed < 95, "a 50ms budget took #{elapsed}ms"
 
-      assert Process.get(:attempts) >= 3,
+      # How many attempts the budget buys is pinned without a clock, because
+      # measuring it from a real call is load-sensitive: a scheduler delay eats
+      # the budget and trims the sequence early. Under the pre-#70 flooring this
+      # sequence was `[100]` — one retry, costing twice the budget.
+      assert [backoff: :exponential, base: 10, expiry: 50]
+             |> RetryOptions.new()
+             |> ExternalService.Retry.plan()
+             |> Enum.to_list() == [10, 20, 20]
+
+      assert Process.get(:attempts) >= 2,
              "the budget bought only #{Process.get(:attempts)} attempts"
     end
 
@@ -508,7 +524,7 @@ defmodule ExternalServiceTest do
 
       sleep = fn delay -> Process.put(:slept, [delay | Process.get(:slept, [])]) end
 
-      ExternalService.start(service,
+      start_service(service,
         circuit_breaker: [tolerate: 100, within: 10_000],
         sleep_function: sleep
       )
@@ -545,7 +561,7 @@ defmodule ExternalServiceTest do
       # The token bucket's burst capacity is exactly `:limit`, so the first five
       # calls go straight through and the sixth is throttled. A short window
       # keeps the resulting sleeps (one emission interval, 10ms) brief.
-      ExternalService.start(service,
+      start_service(service,
         rate_limit: [limit: 5, per: 50],
         sleep_function: sleep
       )
@@ -574,7 +590,7 @@ defmodule ExternalServiceTest do
       Process.put(@fuse_name, 0)
 
       # Configure a distinctive default so we can tell merge from replace.
-      ExternalService.start(@fuse_name,
+      start_service(@fuse_name,
         circuit_breaker: [tolerate: 50, within: 10_000],
         retry: [backoff: :linear, base: 0, max_attempts: 2]
       )
@@ -626,7 +642,7 @@ defmodule ExternalServiceTest do
     setup do
       Process.put(@fuse_name, 0)
 
-      ExternalService.start(@fuse_name,
+      start_service(@fuse_name,
         circuit_breaker: [tolerate: @fuse_retries, within: 10_000]
       )
     end
@@ -727,7 +743,7 @@ defmodule ExternalServiceTest do
 
   describe "call_async" do
     setup do
-      ExternalService.start(@fuse_name,
+      start_service(@fuse_name,
         circuit_breaker: [tolerate: @fuse_retries, within: 10_000]
       )
     end
@@ -743,7 +759,7 @@ defmodule ExternalServiceTest do
       # A high failure tolerance keeps the shared fuse from blowing, so each
       # element's result is deterministic regardless of how the stream is
       # scheduled across processes.
-      ExternalService.start(@fuse_name, circuit_breaker: [tolerate: 100, within: 10_000])
+      start_service(@fuse_name, circuit_breaker: [tolerate: 100, within: 10_000])
     end
 
     def function(arg), do: arg
@@ -969,11 +985,231 @@ defmodule ExternalServiceTest do
     end
   end
 
+  describe "melt semantics" do
+    # The 3.0 default. `guides/tuning.md` exists largely because these two numbers
+    # used to be entangled: `:tolerate` counted attempts, so it could not be tuned
+    # independently of `:max_attempts`, and a call's melts were spread across its
+    # whole retry window.
+
+    setup do
+      Process.put(:count, 0)
+      :ok
+    end
+
+    # This file's `start_service/2` defaults to `:per_attempt` (see the note on
+    # `@retry_opts`); these tests are about the 3.0 default, so they say so.
+    defp per_call_fuse(name, options \\ []) do
+      options =
+        Keyword.update(
+          options,
+          :circuit_breaker,
+          [melt: :per_call],
+          &Keyword.put(&1, :melt, :per_call)
+        )
+
+      start_fuse(name, options)
+    end
+
+    defp failing_call(service, max_attempts \\ 5) do
+      ExternalService.call(
+        service,
+        %RetryOptions{backoff: :linear, base: 0, max_attempts: max_attempts},
+        fn ->
+          Process.put(:count, Process.get(:count) + 1)
+          :retry
+        end
+      )
+    end
+
+    test "a failing call melts once, whatever its attempt count" do
+      for max_attempts <- [1, 3, 8, 20] do
+        service = per_call_fuse(:"per-call-#{max_attempts}", circuit_breaker: [tolerate: 3])
+
+        # `:tolerate` is three calls, so the fourth is the one that opens the
+        # breaker -- at every attempt count, which is the whole point.
+        for _ <- 1..3 do
+          assert {:error, %RetriesExhausted{}} = failing_call(service, max_attempts)
+        end
+
+        assert ExternalService.available?(service)
+        assert {:error, %RetriesExhausted{}} = failing_call(service, max_attempts)
+        assert ExternalService.blown?(service)
+      end
+    end
+
+    test "a call never trips its own breaker mid-flight" do
+      # The zero in the guide's table: with `tolerate: 5, max_attempts: 8` and
+      # per-attempt melting, the *first* call melted the breaker five times inside
+      # its own retry loop and had its remaining attempts rejected by it. Raising
+      # `:max_attempts` made the service give up sooner.
+      service = per_call_fuse(:"no-self-trip", circuit_breaker: [tolerate: 5])
+
+      assert {:error, %RetriesExhausted{}} = failing_call(service, 8)
+
+      assert Process.get(:count) == 8, "the call's own melts cut its retry loop short"
+      assert ExternalService.available?(service)
+    end
+
+    test "a call that succeeds after retrying does not melt at all" do
+      # Retries did their job. A breaker that opened here would convert working
+      # calls into errors; the degraded-but-succeeding case is for telemetry to
+      # report rather than for the breaker to act on.
+      service = per_call_fuse(:"succeeds-after-retry", circuit_breaker: [tolerate: 1])
+
+      for _ <- 1..10 do
+        Process.put(:count, 0)
+
+        assert :ok =
+                 ExternalService.call(
+                   service,
+                   %RetryOptions{backoff: :linear, base: 0, max_attempts: 5},
+                   fn ->
+                     Process.put(:count, Process.get(:count) + 1)
+                     if Process.get(:count) < 4, do: :retry, else: :ok
+                   end
+                 )
+      end
+
+      assert ExternalService.available?(service)
+    end
+
+    test "retry telemetry still counts attempts, not melts" do
+      service = per_call_fuse(:"per-call-telemetry", circuit_breaker: [tolerate: 100])
+      attach_retry_counter(service)
+
+      assert {:error, %RetriesExhausted{}} = failing_call(service, 5)
+
+      assert_receive {:retry_event, 1}
+      assert_receive {:retry_event, 2}
+      assert_receive {:retry_event, 3}
+      assert_receive {:retry_event, 4}
+      assert_receive {:retry_event, 5}
+    end
+
+    test "an exception that exhausts its retries melts once" do
+      service = per_call_fuse(:"per-call-exception", circuit_breaker: [tolerate: 1])
+
+      opts = %RetryOptions{
+        backoff: :linear,
+        base: 0,
+        max_attempts: 5,
+        retry_exceptions: [RuntimeError]
+      }
+
+      for _ <- 1..2 do
+        assert_raise RuntimeError, fn ->
+          ExternalService.call(service, opts, fn -> raise "nope" end)
+        end
+      end
+
+      assert ExternalService.blown?(service)
+    end
+
+    test "a result matched by :retry_on melts once" do
+      service = per_call_fuse(:"per-call-retry-on", circuit_breaker: [tolerate: 1])
+      opts = %RetryOptions{backoff: :linear, base: 0, max_attempts: 5, retry_on: &(&1 == :nope)}
+
+      for _ <- 1..2 do
+        # The predicate asked for a retry, so a spent budget reports exhaustion
+        # with the matched result as the reason rather than returning it.
+        assert {:error, %RetriesExhausted{context: %{reason: :nope}}} =
+                 ExternalService.call(service, opts, fn -> :nope end)
+      end
+
+      assert ExternalService.blown?(service)
+    end
+
+    test "a rate limited call melts nothing, because its function never ran" do
+      service =
+        per_call_fuse(:"per-call-rate-limited",
+          circuit_breaker: [tolerate: 1],
+          rate_limit: [limit: 1, per: 60_000, wait: false]
+        )
+
+      assert :ok = ExternalService.call(service, fn -> :ok end)
+
+      for _ <- 1..5 do
+        assert {:error, %ExternalService.RateLimited{}} =
+                 ExternalService.call(service, fn -> :ok end)
+      end
+
+      assert ExternalService.available?(service)
+    end
+
+    test ":per_attempt keeps the pre-3.0 behavior available" do
+      service =
+        start_fuse(:"opt-in-per-attempt",
+          circuit_breaker: [tolerate: 5, melt: :per_attempt]
+        )
+
+      # Six melts from one call: the breaker opens inside the call's own retry
+      # loop, exactly as it did before 3.0.
+      assert {:error, %CircuitBreakerOpen{}} = failing_call(service, 20)
+      assert ExternalService.blown?(service)
+    end
+
+    test ":per_call requires the retrying to be bounded" do
+      assert_raise ArgumentError, ~r/never give up/, fn ->
+        ExternalService.start(:"unbounded-per-call", retry: [max_attempts: :infinity])
+      end
+
+      # Either bound satisfies it.
+      assert :ok =
+               ExternalService.start(:"bounded-by-expiry",
+                 retry: [max_attempts: :infinity, expiry: 30_000]
+               )
+
+      on_exit(fn -> ExternalService.stop(:"bounded-by-expiry") end)
+    end
+
+    test "the bound is required of per-call retry overrides too" do
+      # `start/2` can only check the service's configured defaults, and a per-call
+      # override can remove the bound it checked.
+      service = per_call_fuse(:"unbounded-override", circuit_breaker: [tolerate: 5])
+
+      assert_raise ArgumentError, ~r/never give up/, fn ->
+        ExternalService.call(service, [max_attempts: :infinity], fn -> :retry end)
+      end
+    end
+
+    test ":per_attempt is what makes unbounded retrying legal" do
+      service =
+        start_fuse(:"unbounded-per-attempt",
+          circuit_breaker: [tolerate: 5, melt: :per_attempt]
+        )
+
+      assert {:error, %CircuitBreakerOpen{}} =
+               ExternalService.call(
+                 service,
+                 %RetryOptions{backoff: :linear, base: 0, max_attempts: :infinity},
+                 fn -> :retry end
+               )
+    end
+
+    defp attach_retry_counter(service) do
+      test = self()
+      handler = {__MODULE__, service, System.unique_integer()}
+
+      :telemetry.attach(
+        handler,
+        [:external_service, :call, :retry],
+        fn _event, _measurements, %{service: ^service}, _config ->
+          count = (Process.get(:retry_events) || 0) + 1
+          Process.put(:retry_events, count)
+          send(test, {:retry_event, count})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+    end
+  end
+
   describe "structured errors" do
     @one_attempt %RetryOptions{backoff: :linear, base: 0, max_attempts: 1}
 
     setup do
-      ExternalService.start(@fuse_name, circuit_breaker: [tolerate: 50, within: 10_000])
+      start_service(@fuse_name, circuit_breaker: [tolerate: 50, within: 10_000])
     end
 
     test "errors returned by call/3 are exceptions that can also be raised" do
@@ -1029,7 +1265,7 @@ defmodule ExternalServiceTest do
   describe "introspection" do
     setup do
       name = :"introspection-test"
-      ExternalService.start(name, circuit_breaker: [tolerate: 1, within: 10_000])
+      start_service(name, circuit_breaker: [tolerate: 1, within: 10_000])
       on_exit(fn -> ExternalService.stop(name) end)
       [name: name]
     end
@@ -1053,7 +1289,7 @@ defmodule ExternalServiceTest do
 
     test "all_available? requires every service to be available", %{name: name} do
       other = :"introspection-test-2"
-      ExternalService.start(other, circuit_breaker: [tolerate: 1, within: 10_000])
+      start_service(other, circuit_breaker: [tolerate: 1, within: 10_000])
       on_exit(fn -> ExternalService.stop(other) end)
 
       assert ExternalService.all_available?([name, other])
@@ -1155,7 +1391,7 @@ defmodule ExternalServiceTest do
 
       # One call per 50ms window, so the second call is throttled for a single
       # emission interval before it is admitted.
-      ExternalService.start(name,
+      start_service(name,
         rate_limit: [limit: 1, per: 50],
         sleep_function: &Process.sleep/1
       )
@@ -1188,8 +1424,24 @@ defmodule ExternalServiceTest do
   # Starts a service with a high failure tolerance (so it won't blow) unless
   # overridden, registers cleanup, and returns its name.
   defp start_fuse(name, options \\ [circuit_breaker: [tolerate: 100, within: 10_000]]) do
-    ExternalService.start(name, options)
+    start_service(name, options)
     on_exit(fn -> ExternalService.stop(name) end)
     name
+  end
+
+  # Starts a service in the pre-3.0 melt semantics unless the test asks otherwise.
+  # See the note on `@retry_opts` at the top of this file: the tests here assert
+  # that an unbounded failing call is eventually halted by its own breaker, which
+  # only a breaker counting attempts does.
+  defp start_service(name, options \\ [circuit_breaker: [tolerate: 100, within: 10_000]]) do
+    options =
+      Keyword.update(
+        options,
+        :circuit_breaker,
+        [melt: :per_attempt],
+        &Keyword.put_new(&1, :melt, :per_attempt)
+      )
+
+    ExternalService.start(name, options)
   end
 end

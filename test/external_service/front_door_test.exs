@@ -92,8 +92,10 @@ defmodule ExternalService.FrontDoorTest do
       assert Service.available?()
       refute Service.blown?()
 
-      # Allow more attempts than the breaker tolerates (3) so it is driven open.
-      Service.call([max_attempts: 10], fn -> :retry end)
+      # `tolerate: 3` with the default `melt: :per_call`: each failing call
+      # charges the breaker once, when its retrying gives up, so it takes four
+      # of them regardless of how many attempts each one makes.
+      Enum.each(1..4, fn _ -> Service.call([max_attempts: 2], fn -> :retry end) end)
 
       assert Service.blown?()
       refute Service.available?()
@@ -106,7 +108,7 @@ defmodule ExternalService.FrontDoorTest do
     test "reset_all/0 clears the rate limiter as well as the breaker" do
       # Spend the whole burst, then trip the breaker.
       Enum.each(1..100, fn _ -> ExternalService.RateLimiter.request(:front_door_service) end)
-      Service.call([max_attempts: 10], fn -> :retry end)
+      Enum.each(1..4, fn _ -> Service.call([max_attempts: 2], fn -> :retry end) end)
 
       assert Service.blown?()
       assert ExternalService.rate_limited?(:front_door_service)
