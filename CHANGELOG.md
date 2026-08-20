@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   options, and an option added to a schema is either generated or fails a test
   saying it is not covered.
 
+  The rate limiter and the concurrency limit are now checked over generated
+  *sequences* rather than configurations, which is the shape their promises
+  actually take: a limiter's interesting failures are about the order operations
+  arrive in, and a concurrency limit's single promise — never more than `:limit`
+  in flight — is a claim about interleavings. Both walk a model alongside the real
+  thing and compare after every step.
+
 ### Fixed
 - **`within: :auto` and the narrow-window check were both under-sized for
   `melt: :per_attempt`** ([issue #112](https://github.com/jvoegele/external_service/issues/112)).
