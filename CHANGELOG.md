@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **`ExternalService.RetryOptions.window/1`** — the total time a fully-failing call
+  spends waiting between attempts, for a set of retry options
+  ([issue #90](https://github.com/jvoegele/external_service/issues/90)). This is the
+  number to compare against a caller's latency budget, and the one the circuit
+  breaker's `:within` window has to be at least as wide as. Until now it existed
+  only as a table in the tuning guide that readers had to look their configuration
+  up in.
+
+      RetryOptions.window(base: 100, max_attempts: 5)              #=> 1500
+      RetryOptions.window(base: 100, max_attempts: 10, cap: 1_000) #=> 6500
+      RetryOptions.window(base: 500, max_attempts: :infinity)      #=> :infinity
+
+  Both tables in [the tuning guide](guides/tuning.md) are now asserted against this
+  function, cell by cell, by a test that reads them out of the guide itself.
+
 ### Fixed
 - **Internal: a retry configuration with an `:expiry` can now be inspected without
   waiting out its budget** ([issue #89](https://github.com/jvoegele/external_service/issues/89)).

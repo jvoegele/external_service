@@ -211,6 +211,48 @@ defmodule ExternalService.Retry do
     build(retry_opts, virtual_budget())
   end
 
+  @doc """
+  Total time a fully-failing call spends *waiting between* attempts, in
+  milliseconds, or `:infinity` when nothing bounds the retrying.
+
+  See `ExternalService.RetryOptions.window/1`, which is the public face of this
+  and carries the documentation.
+  """
+  @spec window(RetryOptions.t()) :: non_neg_integer() | :infinity
+  def window(%RetryOptions{max_attempts: max_attempts, expiry: expiry} = retry_opts) do
+    cond do
+      # A count bound makes the plan finite, so the window is simply what it adds
+      # up to — whether or not an `:expiry` is also set, since whichever bound is
+      # reached first is the one that stops the retrying.
+      #
+      # Jitter is switched off rather than sampled. The window is a property of a
+      # configuration, and it is what `:within` is sized against and what the
+      # checks compare — none of which can be answered by a number that is
+      # different every time it is asked for. Jitter's effect is a stated spread
+      # around this figure.
+      is_integer(max_attempts) ->
+        %RetryOptions{retry_opts | jitter: false} |> plan() |> Enum.sum()
+
+      # Neither bound set: the retrying has no end, and neither does the window.
+      unbounded?(expiry) ->
+        :infinity
+
+      # An unbounded attempt count against a time budget spends that budget and
+      # stops, so the window *is* the budget — there is nothing to add up. The
+      # trimming rule guarantees it: the plan is drawn from an infinite backoff
+      # stream and halts only once the budget is exactly consumed.
+      #
+      # This also answers the one configuration whose plan never terminates —
+      # exponential backoff from a `:base` of `0`, which yields zeros forever and
+      # so never spends anything. A real call there busy-loops for the whole
+      # budget, which is exactly the number returned.
+      true ->
+        expiry
+    end
+  end
+
+  defp unbounded?(bound), do: bound in [nil, :infinity]
+
   defp build(%RetryOptions{} = retry_opts, budget) do
     retry_opts
     |> backoff_stream()
