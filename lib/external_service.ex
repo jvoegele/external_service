@@ -288,6 +288,16 @@ defmodule ExternalService do
   @typedoc "Options for `start/2`. See the schema documented under `start/2`."
   @type options :: keyword()
 
+  @doc false
+  # The raw option schemas, for tests that derive generators from them rather than
+  # restating them. Exposed so that an option added to one is covered by the
+  # property suite without anyone remembering to extend a matrix.
+  @spec __schema__(:start | :circuit_breaker | :rate_limit | :concurrency) :: keyword()
+  def __schema__(:start), do: @start_schema
+  def __schema__(:circuit_breaker), do: @circuit_breaker_schema
+  def __schema__(:rate_limit), do: @rate_limit_schema
+  def __schema__(:concurrency), do: @concurrency_schema
+
   defmodule State do
     @moduledoc false
 

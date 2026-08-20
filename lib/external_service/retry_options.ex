@@ -132,6 +132,13 @@ defmodule ExternalService.RetryOptions do
 
   @validated_schema NimbleOptions.new!(@schema)
 
+  @doc false
+  # The raw option schema, for tests that derive generators from it rather than
+  # restating it. Exposed so that an option added here is covered by the property
+  # suite without anyone remembering to extend a matrix.
+  @spec __schema__() :: keyword()
+  def __schema__, do: @schema
+
   @type t :: %__MODULE__{
           backoff: :exponential | :linear,
           base: non_neg_integer(),

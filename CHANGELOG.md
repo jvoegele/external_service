@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+- **Property-based tests over options generated from the library's own schemas**
+  ([issue #114](https://github.com/jvoegele/external_service/issues/114)).
+  Test-only; nothing about the library's behavior changes, and `stream_data` is a
+  `:dev`/`:test` dependency that never reaches an application using this library.
+
+  The retry-plan invariants — that `RetryOptions.window/1` is what the plan adds
+  up to, that a plan never overshoots its `:expiry`, that every delay is within
+  `:cap` — were a hand-written 144-configuration matrix covering four options,
+  which would not have covered a fifth. They are now properties over generated
+  options, and an option added to a schema is either generated or fails a test
+  saying it is not covered.
+
 ### Fixed
 - **`within: :auto` and the narrow-window check were both under-sized for
   `melt: :per_attempt`** ([issue #112](https://github.com/jvoegele/external_service/issues/112)).
