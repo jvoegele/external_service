@@ -53,8 +53,9 @@ defmodule ExternalService.ExplainTest do
           retry: [max_attempts: :infinity, expiry: 30_000]
         )
 
-      # `:auto` against three failing calls of 30s each.
-      assert report =~ "counting window  90s"
+      # `:auto` against three failing calls of 30s each, with headroom for the
+      # attempt time no configuration states.
+      assert report =~ "counting window  180s"
       refute report =~ ":auto"
     end
 

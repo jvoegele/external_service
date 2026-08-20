@@ -111,9 +111,11 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `:auto` reads what it needs from the retry options and the `:melt` setting: with
   the default `melt: :per_call` a call melts once, so `:tolerate` of them span
   `:tolerate` retry windows; with `melt: :per_attempt` a single call's melts are
-  spread across its own retry window. It is a **floor**, never narrower than the
-  10 seconds it replaces, so no existing service gets a narrower window than it
-  had. An explicit `:within` is left exactly as given.
+  spread across its own retry window. It then doubles that, because the interval
+  between two failing calls is a whole call — its retry window *plus* however long
+  its attempts run for, which no configuration states. It is a **floor**, never
+  narrower than the 10 seconds it replaces, so no existing service gets a narrower
+  window than it had. An explicit `:within` is left exactly as given.
 
   What it cannot know is attempt duration: a failing call takes its retry window
   plus however long its attempts run for, and no configuration states the latter.
