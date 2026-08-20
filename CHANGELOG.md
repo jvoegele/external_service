@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+- **`within: :auto` and the narrow-window check were both under-sized for
+  `melt: :per_attempt`** ([issue #112](https://github.com/jvoegele/external_service/issues/112)).
+  Both sized the window for a *single* call's melts. That is right only when one
+  failing call can produce the whole `:tolerate` + 1 melt budget by itself, and
+  wrong everywhere else — including at the defaults, where `tolerate: 10` against
+  `max_attempts: 5` needs three calls.
+
+  Measured against a live service before the fix: `tolerate: 10`, `melt: :per_attempt`,
+  `base: 500`, `max_attempts: 5`, with `:within` left to size itself, stayed closed
+  through **75 seconds of every single call failing**. `:auto` had installed 15
+  seconds where the failures needed 22.5. After the fix it installs 45 seconds and
+  the breaker opens on the 3rd failing call.
+
+  The window is now sized from how many calls it actually takes to reach the melt
+  budget, counted from the retry plan rather than from `:max_attempts` — an
+  `:expiry` that runs out first makes a call stop short of its attempt count, and
+  a window sized from the count rather than the reality was under-sized in the
+  same way. The rule lives in one function that both `:auto` and the configuration
+  checks use, because the two computing it separately is how they came to be
+  wrong in the same way without either noticing.
+
+  Only `melt: :per_attempt` is affected. The default `:per_call` path is correct:
+  there one melt is one call, so `:tolerate` calls is the right span.
+
 ## [3.0.0-rc.3] - 2026-08-20
 
 rc.2 made a configuration behave predictably. rc.3 is about finding out whether it

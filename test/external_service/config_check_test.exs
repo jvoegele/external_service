@@ -43,8 +43,10 @@ defmodule ExternalService.ConfigCheckTest do
       message = message(options, :narrow_window)
       assert message =~ "narrower than the failures it has to count"
       assert message =~ "1.5s per call"
-      # Three calls need 4.5s, but the suggestion is what `:auto` would install
-      # rather than the bare minimum — and `:auto` never goes below ten seconds.
+      assert message =~ "it takes 4 failing calls to open the breaker, at one melt each"
+      # Four failing calls need 4.5s, but the suggestion is what `:auto` would
+      # install rather than the bare minimum — and `:auto` never goes below ten
+      # seconds.
       assert message =~ ":timer.seconds(10)"
     end
 
@@ -59,18 +61,35 @@ defmodule ExternalService.ConfigCheckTest do
 
       message = message(options, :narrow_window)
       assert message =~ "one after another never opens it"
-      assert message =~ "Concurrent callers still can"
+      assert message =~ "concurrent callers still can"
     end
 
-    test "under :per_attempt it is a single call's own melts, and says so" do
+    test "under :per_attempt it counts how many calls it takes to reach the melt budget" do
+      # Issue #112: this used to compare against a single call's retry window, on
+      # the assumption that one call's melts were always enough. Eleven melts at
+      # five per call needs three calls, and the window has to span all three.
       options = [
         circuit_breaker: [tolerate: 10, within: 1_000, melt: :per_attempt],
         retry: [base: 100, max_attempts: 5]
       ]
 
       message = message(options, :narrow_window)
-      assert message =~ "that call's melts land"
-      assert message =~ "never accumulate to the 10 it tolerates"
+      assert message =~ "it takes 3 failing calls to reach the 11 melts that open the breaker"
+      assert message =~ "at up to 5 per call"
+      assert message =~ "spread over about 4.5s"
+    end
+
+    test "under :per_attempt a call that melts the whole budget itself is a proof, not a guess" do
+      # One call makes eight attempts against a `tolerate` of 3, so it produces all
+      # four melts on its own and traffic cannot rescue it. No caveat is offered.
+      options = [
+        circuit_breaker: [tolerate: 3, within: 100, melt: :per_attempt],
+        retry: [base: 100, max_attempts: 8, cap: 200]
+      ]
+
+      message = message(options, :narrow_window)
+      assert message =~ "one failing call melts it up to 8 times, enough for the 4 that open it"
+      refute message =~ "question of your traffic"
     end
 
     test "says nothing about a window that is wide enough" do
@@ -268,6 +287,7 @@ defmodule ExternalService.ConfigCheckTest do
       # `:timer.seconds(1)` reached the check as 1000, which is the whole reason
       # this runs from a @before_compile hook rather than from __using__.
       assert warning =~ "`within: 1000`"
+      assert warning =~ "spread over about 4.5s"
       assert warning =~ "lib/compile_check_example.ex"
     end
 
