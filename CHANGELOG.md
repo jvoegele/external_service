@@ -7,14 +7,21 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
-### Changed
-- **The guides are re-derived and re-measured** for the 3.0 semantics
-  ([issue #97](https://github.com/jvoegele/external_service/issues/97)). The
-  [Tuning](guides/tuning.md) guide loses two of the three couplings it existed to
-  warn about, and three of the seven items on its checklist, because the library
-  now computes or rejects them. Its three worked configurations were re-derived
-  and measured again against a running service.
+## [3.0.0-rc.2] - 2026-08-20
 
+rc.2 is about the *interplay* between the mechanisms rather than any one of them.
+
+The [Tuning](guides/tuning.md) guide documented three couplings that made a
+configuration hard to reason about: `:tolerate` moved when you changed
+`:max_attempts`, a breaker window narrower than the retry window never opened at
+all, and neither was visible in the options as written. Two of the three are gone,
+the third is computed for you, and what remains is checked when you compile.
+
+**One breaking change**, and it changes what a number you have already tuned
+means. Read the `:tolerate` entry below, and
+[the migration guide](guides/migrating-to-3.0.md#4-tolerate-counts-calls-not-attempts).
+
+### Changed
 - **The circuit breaker's `:tolerate` now counts failing calls, not failing
   attempts** — a breaking change
   ([issue #93](https://github.com/jvoegele/external_service/issues/93)).
@@ -54,6 +61,22 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   calls into errors. `[:external_service, :call, :retry]` telemetry still fires
   per attempt under both settings, so degraded-but-succeeding traffic remains
   observable.
+
+- **The guides are re-derived and re-measured** for the 3.0 semantics
+  ([issue #97](https://github.com/jvoegele/external_service/issues/97)). The
+  [Tuning](guides/tuning.md) guide loses two of the three couplings it existed to
+  warn about, and three of the seven items on its checklist, because the library
+  now computes or rejects them. Its three worked configurations were re-derived
+  and measured again against a running service.
+
+- **Internal: extracted an ExternalService.Retry module**, so that retrying is owned by one
+  module the way the circuit breaker, rate limiter and concurrency limit each are
+  ([issue #86](https://github.com/jvoegele/external_service/issues/86)). It owns the
+  delay streams, the retry loop, and the decision about whether an outcome counts as
+  a retry at all. `ExternalService.RetryOptions` stays public and unchanged in shape —
+  it remains the per-call configuration type callers construct, validate and merge —
+  and simply no longer carries behavior. No public API moved and nothing observable
+  changed.
 
 ### Added
 - **`ExternalService.explain/1`** — a report of what a configuration will do
@@ -155,15 +178,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   and answers the same configuration in microseconds with a sequence that totals
   the budget exactly. No change to what a real call does.
 
-### Changed
-- **Internal: extracted an ExternalService.Retry module**, so that retrying is owned by one
-  module the way the circuit breaker, rate limiter and concurrency limit each are
-  ([issue #86](https://github.com/jvoegele/external_service/issues/86)). It owns the
-  delay streams, the retry loop, and the decision about whether an outcome counts as
-  a retry at all. `ExternalService.RetryOptions` stays public and unchanged in shape —
-  it remains the per-call configuration type callers construct, validate and merge —
-  and simply no longer carries behavior. No public API moved and nothing observable
-  changed.
 
 ## [3.0.0-rc.1] - 2026-08-18
 
@@ -1038,7 +1052,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.1...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.2...HEAD
+[3.0.0-rc.2]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.1...3.0.0-rc.2
 [3.0.0-rc.1]: https://github.com/jvoegele/external_service/compare/2.8.0...3.0.0-rc.1
 [2.8.0]: https://github.com/jvoegele/external_service/compare/2.7.0...2.8.0
 [2.7.0]: https://github.com/jvoegele/external_service/compare/2.6.0...2.7.0
