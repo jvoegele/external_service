@@ -7,25 +7,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
-### Changed
-- **Property-based tests over options generated from the library's own schemas**
-  ([issue #114](https://github.com/jvoegele/external_service/issues/114)).
-  Test-only; nothing about the library's behavior changes, and `stream_data` is a
-  `:dev`/`:test` dependency that never reaches an application using this library.
+## [3.0.0-rc.4] - 2026-08-20
 
-  The retry-plan invariants — that `RetryOptions.window/1` is what the plan adds
-  up to, that a plan never overshoots its `:expiry`, that every delay is within
-  `:cap` — were a hand-written 144-configuration matrix covering four options,
-  which would not have covered a fifth. They are now properties over generated
-  options, and an option added to a schema is either generated or fails a test
-  saying it is not covered.
+One fix, and the testing that found it.
 
-  The rate limiter and the concurrency limit are now checked over generated
-  *sequences* rather than configurations, which is the shape their promises
-  actually take: a limiter's interesting failures are about the order operations
-  arrive in, and a concurrency limit's single promise — never more than `:limit`
-  in flight — is a claim about interleavings. Both walk a model alongside the real
-  thing and compare after every step.
+A circuit breaker configured with `melt: :per_attempt` could be installed with a
+counting window too narrow to ever open it — measured at 75 seconds of every call
+failing with the breaker still closed. `:per_attempt` is what
+[the migration guide](guides/migrating-to-3.0.md#4-tolerate-counts-calls-not-attempts)
+offers as "keep the 2.x behavior", so **if you took that option, read the `:auto`
+entry below**. Everything on the default `melt: :per_call` was and is correct.
+
+The rest is test-only and changes nothing about how the library behaves.
 
 ### Fixed
 - **`within: :auto` and the narrow-window check were both under-sized for
@@ -51,6 +44,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
   Only `melt: :per_attempt` is affected. The default `:per_call` path is correct:
   there one melt is one call, so `:tolerate` calls is the right span.
+
+### Changed
+- **Property-based tests over options generated from the library's own schemas**
+  ([issue #114](https://github.com/jvoegele/external_service/issues/114)).
+  Test-only; nothing about the library's behavior changes, and `stream_data` is a
+  `:dev`/`:test` dependency that never reaches an application using this library.
+
+  The retry-plan invariants — that `RetryOptions.window/1` is what the plan adds
+  up to, that a plan never overshoots its `:expiry`, that every delay is within
+  `:cap` — were a hand-written 144-configuration matrix covering four options,
+  which would not have covered a fifth. They are now properties over generated
+  options, and an option added to a schema is either generated or fails a test
+  saying it is not covered.
+
+  The rate limiter and the concurrency limit are now checked over generated
+  *sequences* rather than configurations, which is the shape their promises
+  actually take: a limiter's interesting failures are about the order operations
+  arrive in, and a concurrency limit's single promise — never more than `:limit`
+  in flight — is a claim about interleavings. Both walk a model alongside the real
+  thing and compare after every step.
 
 ## [3.0.0-rc.3] - 2026-08-20
 
@@ -1159,7 +1172,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.3...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.4...HEAD
+[3.0.0-rc.4]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.3...3.0.0-rc.4
 [3.0.0-rc.3]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.2...3.0.0-rc.3
 [3.0.0-rc.2]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.1...3.0.0-rc.2
 [3.0.0-rc.1]: https://github.com/jvoegele/external_service/compare/2.8.0...3.0.0-rc.1

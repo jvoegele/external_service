@@ -153,8 +153,15 @@ ExternalService.start(service,
 {elapsed, result} = :timer.tc(fn -> ExternalService.call(service, fn -> :retry end) end)
 
 assert {:error, %ExternalService.RetriesExhausted{}} = result
-assert elapsed < 50_000    # three attempts, no waiting between them
+assert elapsed < 500_000   # three attempts, and none of them waited
 ```
+
+Note how loose that bound is. It is there to separate *the backoff was removed*
+from *production backoff is still on* — an HTTP service's 1.5-second retry window
+— and not to measure anything. A tight bound on elapsed time measures the machine
+the suite is running on: this assertion used to be `50_000`, and failed on a busy
+CI runner at 68ms with nothing wrong. If you want to assert on the delays
+themselves, assert on the delays themselves, with `:sleep_function` below.
 
 The generous `:tolerate` is deliberate: a test that exhausts retries melts the
 breaker once, and a suite that does it repeatedly against a shared service will

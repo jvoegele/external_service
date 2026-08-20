@@ -40,8 +40,12 @@ defmodule ExternalService.TestingGuideExamplesTest do
         end)
 
       assert {:error, %RetriesExhausted{}} = result
-      # Three attempts, no waiting between them.
-      assert elapsed < 50_000
+
+      # Generous on purpose. What this separates is "the backoff was removed" from
+      # "production backoff is still on" — an HTTP service's 1.5s retry window,
+      # not a millisecond of scheduling. A tight bound here measures the machine:
+      # at 50ms this failed on a loaded CI runner at 68ms, with nothing wrong.
+      assert elapsed < 500_000
     end
 
     test "a sleep function records the real backoff without waiting for it",
@@ -75,7 +79,10 @@ defmodule ExternalService.TestingGuideExamplesTest do
         :timer.tc(fn -> ExternalService.call(service, fn -> flunk("should not run") end) end)
 
       assert {:error, %RateLimited{}} = result
-      assert elapsed < 50_000
+
+      # Loose for the same reason as above: this separates "returned immediately"
+      # from "waited for the window", and the window here is a minute.
+      assert elapsed < 500_000
     end
 
     test "a no-op :sleep_function does NOT skip the wait — it busy-waits", %{service: service} do
