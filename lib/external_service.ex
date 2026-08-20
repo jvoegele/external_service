@@ -70,12 +70,24 @@ defmodule ExternalService do
   alias ExternalService.Retry
   alias ExternalService.RetryOptions
   alias ExternalService.ServiceNotStarted
+  alias ExternalService.Simulation
+  alias ExternalService.Simulator
 
   require Errata
   require Logger
 
   @typedoc "A term that uniquely identifies an external service."
   @type service :: term()
+
+  @typedoc """
+  A dependency to simulate a configuration against. See `simulate/3`.
+  """
+  @type scenario ::
+          :always_failing
+          | {:always_failing, attempt_ms :: non_neg_integer()}
+          | {:slow, attempt_ms :: non_neg_integer()}
+          | {:failing_for, ms :: non_neg_integer()}
+          | {:intermittent, rate :: float()}
 
   @typedoc """
   What one unit of the circuit breaker's `:tolerate` counts: a failing call, or a
@@ -612,6 +624,105 @@ defmodule ExternalService do
     case State.fetch(service) do
       {:ok, %State{options: options}} -> Explanation.render(service, options)
       :error -> service_not_started_message(service)
+    end
+  end
+
+  @doc """
+  Runs a configuration against a failing dependency and reports what happened.
+
+  `explain/1` says what a configuration *is*; this says what it *does*. The
+  question it answers is the one every resilience configuration has and few are
+  ever asked: does the breaker actually open, how long does a failing call take,
+  and how much load does a dead dependency absorb first?
+
+      test "our breaker actually opens, and fast enough" do
+        assert %ExternalService.Simulation{opens_after: opens, worst_call: worst} =
+                 ExternalService.simulate(MyApp.Stripe, :always_failing)
+
+        assert opens <= 5
+        assert worst < 2_000
+      end
+
+  Takes a started service or a keyword list of options, like `explain/1`.
+
+  ## Scenarios
+
+    * `:always_failing` — every attempt fails, instantly. The base case.
+    * `{:always_failing, attempt_ms}` — every attempt fails and takes `attempt_ms`.
+      Attempt duration is the one thing a configuration cannot state, and the thing
+      that makes a hand-sized `:within` too narrow, so this is the scenario worth
+      running against a dependency you know to be slow.
+    * `{:slow, attempt_ms}` — attempts succeed but take `attempt_ms` each. Nothing
+      fails, so the breaker never opens; `:worst_call` is the answer here.
+    * `{:failing_for, ms}` — fails for the first `ms` of simulated time, then
+      recovers.
+    * `{:intermittent, rate}` — each attempt fails with probability `rate`. Seed
+      `:rand` for a reproducible run.
+
+  ## Options
+
+    * `:max_calls` — how many calls to simulate before giving up on the breaker
+      opening. Defaults to `100`.
+
+  ## What it does and does not model
+
+  It runs on a **virtual clock**, so simulating half an hour of a background job
+  costs microseconds and no test waits for anything. Delays are nominal, with
+  `:jitter` switched off — the same choice `RetryOptions.window/1` and `explain/1`
+  make, so that all three agree and a simulation asserted in a test does not vary
+  between runs. Jitter changes the exact `:worst_call`, never whether a breaker
+  opens.
+
+  The delays come from the library's own planner, the options are resolved through
+  the same path `start/2` uses, and melting follows the service's `:melt` setting.
+  The one thing modelled rather than executed is the circuit breaker's sliding
+  failure window, which is what makes a virtual clock possible at all — a real
+  breaker counts against real time. That model is pinned against measured behavior
+  in the test suite, including a configuration that stays closed through twelve
+  consecutive failing calls.
+
+  The rate limiter and the concurrency limit are not simulated. Neither melts the
+  breaker, and both govern the traffic reaching a service rather than what the
+  service does with a failure.
+
+  Simulated calls arrive one after another, which is the worst case for opening a
+  breaker: concurrent callers deliver failures closer together, so a breaker that
+  opens here opens at least as readily under real traffic.
+
+  ## Examples
+
+      iex> %ExternalService.Simulation{opens_after: opens} =
+      ...>   ExternalService.simulate(
+      ...>     [circuit_breaker: [tolerate: 3], retry: [base: 100, max_attempts: 5]],
+      ...>     :always_failing
+      ...>   )
+      iex> opens
+      4
+  """
+  @spec simulate(service() | keyword(), scenario(), keyword()) :: Simulation.t()
+  def simulate(service_or_options, scenario, opts \\ [])
+
+  def simulate(options, scenario, opts) when is_list(options) do
+    service = Keyword.get(options, :name, "this configuration")
+
+    resolved =
+      options
+      |> Keyword.delete(:name)
+      |> then(&validate!(service, &1))
+      |> then(&resolve_breaker_options(service, &1))
+
+    Simulator.run(service, resolved, scenario, opts)
+  end
+
+  def simulate(service, scenario, opts) do
+    case State.fetch(service) do
+      {:ok, %State{options: options}} ->
+        Simulator.run(service, options, scenario, opts)
+
+      # Unlike `explain/1`, which can report "not started" as part of a string,
+      # there is no simulation to return for a service that does not exist.
+      :error ->
+        raise service_not_started(service)
     end
   end
 
