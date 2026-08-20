@@ -113,6 +113,10 @@ defmodule ExternalService do
   """
   @type sleep_function :: (non_neg_integer() -> any())
 
+  # The window `:auto` never goes below, and what `:within` defaulted to flatly
+  # before it.
+  @default_within 10_000
+
   @circuit_breaker_schema [
     tolerate: [
       type: {:or, [:pos_integer, {:in, [:infinity]}]},
@@ -137,9 +141,14 @@ defmodule ExternalService do
           "bounded — see the note on unbounded retries below."
     ],
     within: [
-      type: :pos_integer,
-      default: 10_000,
-      doc: "Length of the failure-counting window, in milliseconds."
+      type: {:or, [:pos_integer, {:in, [:auto]}]},
+      default: :auto,
+      doc:
+        "Length of the failure-counting window, in milliseconds. `:auto` (the default) " <>
+          "sizes the window against the retry options instead, since how long it takes " <>
+          "`:tolerate` failures to arrive depends on how long a failing call takes. It is " <>
+          "a floor, never narrower than the 10 seconds it replaces — see " <>
+          "[Sizing the window](tuning.md) for when to set it yourself."
     ],
     reset: [
       type: :pos_integer,
@@ -344,6 +353,7 @@ defmodule ExternalService do
 
     {melt, breaker_options} = Keyword.pop!(options[:circuit_breaker], :melt)
     validate_melt_bound!(service, melt, options[:retry])
+    breaker_options = resolve_within(breaker_options, melt, options[:retry])
 
     circuit_breaker = CircuitBreaker.install(service, breaker_options)
 
@@ -398,6 +408,45 @@ defmodule ExternalService do
 
     NimbleOptions.validate!(options, @start_schema)
   end
+
+  # `:within` has to be wide enough for `:tolerate` failures to land inside it, and
+  # how long that takes depends on the retry options — which is why a flat default
+  # stops fitting the moment someone raises `:base`. `:auto` reads it off them.
+  #
+  # What it reads depends on what one melt counts:
+  #
+  #   * `:per_call` — one melt per call, so `:tolerate` of them are spread across
+  #     `:tolerate` call durations.
+  #   * `:per_attempt` — a single call's melts are spread across that call's own
+  #     retry window, so the window has to be at least that wide for even one
+  #     call's failures to accumulate.
+  #
+  # It is a floor and not a guarantee, deliberately: a failing call takes its retry
+  # window *plus* however long its attempts run for, and nothing here knows the
+  # latter (see `retries.md#nothing-here-bounds-a-single-attempt`). Under
+  # concurrent traffic melts arrive faster than this assumes and the breaker opens
+  # sooner, which is the safe direction. So `:auto` never goes below the flat
+  # default it replaces, and only ever widens from there.
+  defp resolve_within(breaker_options, melt, retry_options) do
+    Keyword.update!(breaker_options, :within, fn
+      :auto -> auto_within(breaker_options[:tolerate], melt, retry_options)
+      within -> within
+    end)
+  end
+
+  defp auto_within(tolerate, melt, retry_options) do
+    case RetryOptions.window(retry_options) do
+      # Unbounded retrying (only reachable under `:per_attempt`, since `:per_call`
+      # rejects it) has no window to size against.
+      :infinity -> @default_within
+      window -> max(@default_within, window * melts_per_open(tolerate, melt))
+    end
+  end
+
+  defp melts_per_open(_tolerate, :per_attempt), do: 1
+  # `tolerate: :infinity` installs no breaker at all, so there is nothing to size.
+  defp melts_per_open(:infinity, :per_call), do: 1
+  defp melts_per_open(tolerate, :per_call), do: tolerate
 
   # Per-call melting charges the breaker once, when a call's retrying gives up. A
   # call that cannot give up therefore never melts at all, and the breaker — which

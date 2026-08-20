@@ -24,6 +24,7 @@ each has a one-line way to keep the old behavior if it was what you wanted.
 | Rate limit wait               | unbounded — sleeps until admitted            | one window (`:per`), capped at 5s         | `rate_limit: [wait: :infinity]` |
 | `:expiry` under 100ms         | floors the last delay at 100ms and adds an attempt | trims the last delay to the budget  | no equivalent — see below     |
 | Circuit breaker `:tolerate`   | counts failing **attempts**                  | counts failing **calls**                  | `circuit_breaker: [melt: :per_attempt]` |
+| Circuit breaker `:within`     | `10_000`                                     | `:auto` — sized from the retry options, never below `10_000` | `circuit_breaker: [within: 10_000]` |
 | `:decorator` dependency       | installed transitively                       | declare it yourself                       | add it to your `deps`         |
 
 The first two are silent: same code, different behavior. The third is silent but
@@ -207,6 +208,17 @@ circuit_breaker: [tolerate: 20, within: :timer.seconds(30)]
 circuit_breaker: [tolerate: 3, within: :timer.seconds(120)]
 ```
 
+**`:within` now defaults to `:auto`, which does this arithmetic for you** — it
+sizes the window against your retry options and the `:melt` setting, and is never
+narrower than the 10 seconds it replaces. The example above is what `:auto`
+computes. You only need to set `:within` yourself if you want something other than
+that floor, and an explicit value is left exactly as given.
+
+Note what `:auto` cannot know: a failing call takes its retry window *plus*
+however long its attempts run for, and no configuration states the latter. So it
+is a floor rather than a guarantee. If your dependency's attempts are slow, size
+`:within` against how long a failing call really takes.
+
 ### Unbounded retrying now needs a time budget
 
 Under `:per_call`, a call that never gives up never melts — so
@@ -258,7 +270,7 @@ one fewer transitive dependency.
 - [ ] Set `wait: :infinity` explicitly on any service used from a Flow pipeline or background job.
 - [ ] Check for `:expiry` values under 100ms; if any, confirm the new attempt count and timing are what you want.
 - [ ] Divide every `:tolerate` by the `:max_attempts` it was sized against — it counts calls now.
-- [ ] Check `:within` is wide enough for `:tolerate` failing *calls* to arrive, not attempts. Slow services need a wider window than before.
+- [ ] Check `:within` is wide enough for `:tolerate` failing *calls* to arrive, not attempts. Leaving it unset lets `:auto` size it; an explicit value is your own to check, and slow services need a wider window than before.
 - [ ] Add an `:expiry` to any service retrying with `max_attempts: :infinity`, or set `circuit_breaker: [melt: :per_attempt]`.
 - [ ] Add `{:decorator, "~> 1.4"}` to your deps if you use `@decorate external_call`.
 - [ ] Add clauses for `ExternalService.RetriesExhausted` and `ExternalService.RateLimited` wherever a previously-unbounded call is handled — these are the errors that could not occur before.
