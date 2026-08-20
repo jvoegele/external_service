@@ -206,10 +206,12 @@ attempt is the caller's job; see
 > 10. The breaker never opens and the call never returns. Always set an explicit
 > `:max_attempts` or `:expiry` — and a `:cap`, below — for unattended retries.
 >
-> The coupling runs the other way too: every failing attempt melts the breaker,
-> so a bounded `:max_attempts` makes the breaker open *sooner* than `:tolerate`
-> suggests. See
-> [`:tolerate` counts attempts, not calls](circuit-breakers.md#what-counts-as-a-failure).
+> Since 3.0 this combination is **rejected** rather than merely discouraged: under
+> the default melt semantics a call that never gives up never melts the breaker, so
+> there would be nothing at all to stop it. The paragraph above describes what the
+> breaker does for services that opt back into `circuit_breaker: [melt: :per_attempt]`,
+> where it remains the only backstop and an unreliable one. See
+> [`:tolerate` counts calls, not attempts](circuit-breakers.md#what-counts-as-a-failure).
 
 ### Unbounded retries are a choice you have to make
 
@@ -383,6 +385,6 @@ independently, and that is not optional. Five attempts spread over a ~1.5 second
 retry window means `:within` has to be wider than 1.5 seconds for the melts to
 accumulate at all, and `:tolerate` has to be about `3 × max_attempts` for three
 calls to be what trips it. Get that wrong and the breaker never opens: see
-[Sizing the breaker against your retry settings](tuning.md#sizing-the-breaker-against-your-retry-settings)
+[Sizing the breaker](tuning.md#sizing-the-breaker)
 for the measurement, and the [Tuning](tuning.md) guide for choosing all of these
 together.

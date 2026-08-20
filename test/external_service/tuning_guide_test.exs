@@ -79,34 +79,55 @@ defmodule ExternalService.TuningGuideTest do
   end
 
   describe "the worked examples" do
-    test "the request-path example's window is inside the breaker window it is paired with" do
-      window =
-        RetryOptions.window(backoff: :exponential, base: 100, max_attempts: 4, expiry: 1_000)
+    # The guide quotes a retry window and a resolved `:within` for each of its
+    # three situations. Both are computed, so both can be asserted; the wall-clock
+    # figures beside them ("about 670ms", "opens on the 4th call") were measured
+    # against a running service and are not re-measured here — that would be a
+    # slow, flaky test of arithmetic these two numbers already pin.
 
-      assert window == 700
-      assert window < :timer.seconds(5)
+    defp resolved_within(tolerate, retry) do
+      ExternalService.CircuitBreaker.auto_window(
+        tolerate,
+        :per_call,
+        RetryOptions.new(retry)
+      )
     end
 
-    test "the sizing example's window is the 1.5s the guide sizes its breaker from" do
-      assert RetryOptions.window(
-               backoff: :exponential,
-               base: 100,
-               cap: 2_000,
-               max_attempts: 5,
-               expiry: 10_000,
-               jitter: true
-             ) == 1_500
+    test "the request path example" do
+      retry = [backoff: :exponential, base: 100, max_attempts: 4, expiry: 1_000, jitter: true]
+
+      assert RetryOptions.window(retry) == 700
+      assert resolved_within(3, retry) == :timer.seconds(10)
     end
 
-    test "the background-job example spends its :expiry rather than its attempt count" do
-      assert RetryOptions.window(
-               backoff: :exponential,
-               base: 500,
-               cap: :timer.seconds(5),
-               max_attempts: :infinity,
-               expiry: :timer.seconds(30),
-               jitter: true
-             ) == 30_000
+    test "the background job example" do
+      retry = [
+        backoff: :exponential,
+        base: 500,
+        cap: :timer.seconds(5),
+        max_attempts: :infinity,
+        expiry: :timer.seconds(30),
+        jitter: true
+      ]
+
+      # It spends its `:expiry` exactly rather than stopping on an attempt count.
+      assert RetryOptions.window(retry) == 30_000
+
+      # The number the guide pauses on: a slow service needs a *wider* counting
+      # window than a fast one, and four failures two minutes apart have to be
+      # counted over a window wider than two minutes.
+      assert resolved_within(3, retry) == :timer.seconds(180)
+    end
+
+    test "the Flow pipeline example" do
+      retry = [backoff: :exponential, base: 100, cap: 2_000, max_attempts: 5, jitter: true]
+
+      assert RetryOptions.window(retry) == 1_500
+      assert resolved_within(3, retry) == :timer.seconds(10)
+    end
+
+    test "the sizing example is the default retry configuration at base: 100" do
+      assert RetryOptions.window(base: 100, max_attempts: 5) == 1_500
     end
   end
 

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Changed
+- **The guides are re-derived and re-measured** for the 3.0 semantics
+  ([issue #97](https://github.com/jvoegele/external_service/issues/97)). The
+  [Tuning](guides/tuning.md) guide loses two of the three couplings it existed to
+  warn about, and three of the seven items on its checklist, because the library
+  now computes or rejects them. Its three worked configurations were re-derived
+  and measured again against a running service.
+
 - **The circuit breaker's `:tolerate` now counts failing calls, not failing
   attempts** — a breaking change
   ([issue #93](https://github.com/jvoegele/external_service/issues/93)).
