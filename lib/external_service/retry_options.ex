@@ -97,9 +97,11 @@ defmodule ExternalService.RetryOptions do
   policy. If your dependency needs a longer retry window, raise `:base` (`100` is
   the usual choice for an HTTP service) rather than the attempt count.
 
-  Note that this bound and the circuit breaker's `:tolerate` interact: every
-  failing attempt melts the breaker, so five attempts melt five of the ten a
-  default breaker tolerates, and two fully-failing calls open it.
+  Since 3.0 this bound is independent of the circuit breaker's `:tolerate`, which
+  counts failing *calls* rather than failing attempts — so raising `:max_attempts`
+  no longer spends the breaker's budget faster. Services configured with
+  `circuit_breaker: [melt: :per_attempt]` keep the older coupling, where each
+  attempt melts and the two cannot be tuned separately.
 
   `:expiry` adds a time budget alongside the count; whichever is reached first
   stops the retrying. See [Bounding retries](retries.md#bounding-retries).
@@ -111,10 +113,21 @@ defmodule ExternalService.RetryOptions do
       ExternalService.start(:my_service, retry: [max_attempts: :infinity])
 
   Be deliberate about it. A call that keeps returning `:retry` then keeps
-  retrying forever, and the circuit breaker is not a reliable backstop —
+  retrying forever, and the circuit breaker is not a backstop: under the default
+  `melt: :per_call` a call charges the breaker when its retrying gives up, so one
+  that never gives up never melts. That combination is rejected rather than
+  allowed to hang — pair `:max_attempts` with an `:expiry`, which is the shape
+  meant for work that genuinely has nowhere else to go:
+
+      ExternalService.start(:my_service,
+        retry: [max_attempts: :infinity, expiry: :timer.seconds(30)]
+      )
+
+  Truly unbounded retrying is still available under
+  `circuit_breaker: [melt: :per_attempt]`, where each failing attempt melts and
+  the breaker does eventually halt the loop — though not reliably, since
   exponential backoff widens the gap between attempts until failures no longer
-  accumulate fast enough to open it. Pair it with an `:expiry`, or reserve it for
-  work that genuinely has nowhere else to go.
+  accumulate fast enough to open it.
   """
 
   @validated_schema NimbleOptions.new!(@schema)

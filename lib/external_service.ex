@@ -35,12 +35,16 @@ defmodule ExternalService do
       * Metadata: `:service`, `:kind`, `:reason`, `:stacktrace`
 
     * `[:external_service, :call, :retry]` - emitted each time a call's function
-      fails in a way that melts the circuit breaker: it returned `:retry` /
-      `{:retry, reason}`, it returned a result matched by the `:retry_on`
-      predicate, or it raised an exception matched by the `:retry_exceptions` retry
-      option. Exceptions `:retry_exceptions` does not match neither melt the breaker
-      nor emit this event. Whether another attempt is actually made depends on the
-      retry options.
+      fails retriably: it returned `:retry` / `{:retry, reason}`, it returned a
+      result matched by the `:retry_on` predicate, or it raised an exception matched
+      by the `:retry_exceptions` retry option. Exceptions `:retry_exceptions` does
+      not match neither count as a failure nor emit this event. Whether another
+      attempt is actually made depends on the retry options.
+
+      This counts **attempts**, under either `:melt` setting — a failed attempt is
+      worth observing whether or not it charges the circuit breaker. It is
+      therefore not a melt count: with the default `melt: :per_call`, a call that
+      retries four times and then succeeds emits this four times and melts nothing.
       * Measurements: `:count` (always `1`)
       * Metadata: `:service`, `:reason`
 
@@ -70,6 +74,12 @@ defmodule ExternalService do
 
   @typedoc "A term that uniquely identifies an external service."
   @type service :: term()
+
+  @typedoc """
+  What one unit of the circuit breaker's `:tolerate` counts: a failing call, or a
+  failing attempt. See the `:melt` circuit breaker option under `start/2`.
+  """
+  @type melt :: :per_call | :per_attempt
 
   @typedoc "Error returned when the allowable number of retries has been exceeded"
   @type retries_exhausted :: {:error, RetriesExhausted.t()}
@@ -108,12 +118,23 @@ defmodule ExternalService do
       type: {:or, [:pos_integer, {:in, [:infinity]}]},
       default: 10,
       doc:
-        "Number of failed **attempts** tolerated within the `:within` window before the " <>
-          "breaker opens. Every failing retry attempt melts the breaker, so a single " <>
-          "`call/3` with `max_attempts: 5` contributes up to 5 of them — `:tolerate` and " <>
-          "`:max_attempts` cannot be tuned independently. `:infinity` installs no breaker " <>
-          "at all: it never opens, holds no state, and cannot be combined with " <>
-          "`:fault_injection`."
+        "Number of failures tolerated within the `:within` window before the breaker " <>
+          "opens. What counts as one failure is set by `:melt`, and defaults to one " <>
+          "failing **call** — so `tolerate: 3` means three dead calls, whatever " <>
+          "`:max_attempts` is. `:infinity` installs no breaker at all: it never opens, " <>
+          "holds no state, and cannot be combined with `:fault_injection`."
+    ],
+    melt: [
+      type: {:in, [:per_call, :per_attempt]},
+      default: :per_call,
+      doc:
+        "What one unit of `:tolerate` counts. `:per_call` (the default) melts the breaker " <>
+          "once per call, when its retrying gives up, so `:tolerate` is denominated in " <>
+          "calls and is independent of `:max_attempts`. `:per_attempt` melts on every " <>
+          "failing attempt, which is how versions before 3.0 behaved: a single call with " <>
+          "`max_attempts: 5` then contributes up to 5, and `:tolerate` cannot be tuned " <>
+          "independently of the retry options. `:per_call` requires retrying to be " <>
+          "bounded — see the note on unbounded retries below."
     ],
     within: [
       type: :pos_integer,
@@ -257,21 +278,31 @@ defmodule ExternalService do
     # lock-free reads with no process to message or crash. This replaces the
     # previous unsupervised `Agent`.
 
-    defstruct [:service, :circuit_breaker, :rate_limit, :concurrency, :retry_options, :sleep]
+    defstruct [
+      :service,
+      :circuit_breaker,
+      :melt,
+      :rate_limit,
+      :concurrency,
+      :retry_options,
+      :sleep
+    ]
 
     @type t :: %__MODULE__{
             service: ExternalService.service(),
             circuit_breaker: ExternalService.CircuitBreaker.t(),
+            melt: ExternalService.melt(),
             rate_limit: ExternalService.RateLimiter.t(),
             concurrency: ExternalService.Concurrency.t(),
             retry_options: ExternalService.RetryOptions.t(),
             sleep: ExternalService.sleep_function()
           }
 
-    def init(service, circuit_breaker, rate_limit, concurrency, retry_options, sleep) do
+    def init(service, circuit_breaker, melt, rate_limit, concurrency, retry_options, sleep) do
       state = %__MODULE__{
         service: service,
         circuit_breaker: circuit_breaker,
+        melt: melt,
         rate_limit: rate_limit,
         concurrency: concurrency,
         retry_options: retry_options,
@@ -311,7 +342,10 @@ defmodule ExternalService do
     options = validate!(service, options)
     validate_breaker_combination!(service, options[:circuit_breaker])
 
-    circuit_breaker = CircuitBreaker.install(service, options[:circuit_breaker])
+    {melt, breaker_options} = Keyword.pop!(options[:circuit_breaker], :melt)
+    validate_melt_bound!(service, melt, options[:retry])
+
+    circuit_breaker = CircuitBreaker.install(service, breaker_options)
 
     rate_limit =
       RateLimiter.new(
@@ -331,7 +365,7 @@ defmodule ExternalService do
 
     sleep = Keyword.get(options, :sleep_function, &Process.sleep/1)
 
-    State.init(service, circuit_breaker, rate_limit, concurrency, retry_options, sleep)
+    State.init(service, circuit_breaker, melt, rate_limit, concurrency, retry_options, sleep)
     :ok
   end
 
@@ -363,6 +397,51 @@ defmodule ExternalService do
     end
 
     NimbleOptions.validate!(options, @start_schema)
+  end
+
+  # Per-call melting charges the breaker once, when a call's retrying gives up. A
+  # call that cannot give up therefore never melts at all, and the breaker — which
+  # used to be the backstop that stopped such a call — records nothing about it.
+  # Worse than useless: before 3.0 an unbounded retry loop was eventually halted by
+  # the breaker it was melting, so allowing this combination silently would turn a
+  # bounded-in-practice loop into one that runs forever.
+  #
+  # So `:per_call` requires retrying to be bounded by something. Either bound will
+  # do — a count or a time budget — and this is the combination `guides/tuning.md`
+  # already told people to avoid, now that it is not merely unwise but inert.
+  #
+  # Checked here for the service's configured defaults, and again per call in
+  # `call_with_retry/4`, because retry options can be overridden per call and an
+  # override can remove the bound this checked.
+  @doc false
+  @spec validate_melt_bound!(service(), melt(), RetryOptions.t() | keyword()) :: :ok
+  def validate_melt_bound!(service, melt, retry_options)
+
+  def validate_melt_bound!(_service, :per_attempt, _retry_options), do: :ok
+
+  def validate_melt_bound!(service, :per_call, retry_options) do
+    retry_options = RetryOptions.new(retry_options)
+
+    if RetryOptions.window(retry_options) == :infinity do
+      raise ArgumentError, """
+      #{inspect(service)} combines circuit_breaker: [melt: :per_call] with retry \
+      options that never give up (max_attempts: :infinity and no :expiry), which \
+      cannot work: :per_call melts the breaker when a call's retrying gives up, so \
+      a call that never gives up never melts, and nothing stops it.
+
+      Bound the retrying, with either bound:
+
+          retry: [max_attempts: :infinity, expiry: :timer.seconds(30)]
+          retry: [max_attempts: 5]
+
+      Or keep the pre-3.0 melt semantics, where every failing attempt melts the \
+      breaker and the breaker is what eventually halts an unbounded retry loop:
+
+          circuit_breaker: [melt: :per_attempt]
+      """
+    end
+
+    :ok
   end
 
   # `:fault_injection` exists to make a breaker report blown; `tolerate: :infinity`
@@ -738,6 +817,10 @@ defmodule ExternalService do
   end
 
   defp call_with_retry(service, state, retry_opts, function) do
+    # Retry options can be overridden per call, and an override can remove the
+    # bound that `start/2` checked for.
+    :ok = validate_melt_bound!(service, state.melt, retry_opts)
+
     attempt = fn ->
       case CircuitBreaker.ask(service, state.circuit_breaker) do
         :ok ->
@@ -753,16 +836,24 @@ defmodule ExternalService do
       {:no_retry, _} = result ->
         result
 
+      # The retrying gave up. Under the default `:per_call` melt semantics this is
+      # the one moment a failing call charges the circuit breaker, which is what
+      # makes `:tolerate` count calls rather than attempts. A call that succeeds on
+      # a later attempt never reaches here and so never melts: retries did their
+      # job, and a breaker that opened on it would turn working calls into errors.
       {:error, :retry} = error ->
+        melt_call(service, state)
         error
 
       {:error, {:retry, _reason}} = error ->
+        melt_call(service, state)
         error
 
       # Retries are spent on an exception we were retrying: re-raise the original
       # with its original stacktrace, so the trace still points at the code that
       # raised rather than at this retry loop.
       {:error, {:retry_exception, exception, stacktrace}} ->
+        melt_call(service, state)
         reraise(exception, stacktrace)
     end
   catch
@@ -811,13 +902,22 @@ defmodule ExternalService do
   # attempt wants another; this is where that decision is charged to the circuit
   # breaker and reported to telemetry, because both are about composing mechanisms
   # rather than about retrying.
+  #
+  # Telemetry is emitted per attempt under both melt semantics — an attempt that
+  # failed is worth observing whether or not it charges the breaker — so
+  # `[:external_service, :call, :retry]` counts attempts and is not a melt count.
   defp record_attempt({:no_retry, _} = result, _service, _state), do: result
 
   defp record_attempt(retry, service, state) do
     emit_retry(service, Retry.reason(retry))
-    melt(service, state)
+    if state.melt == :per_attempt, do: melt(service, state)
     retry
   end
+
+  # Melting for the call as a whole, under `:per_call`. Split from `melt/2` so
+  # that each melt site names which semantics put it there.
+  defp melt_call(service, %State{melt: :per_call} = state), do: melt(service, state)
+  defp melt_call(_service, %State{melt: :per_attempt}), do: :ok
 
   defp melt(service, state), do: CircuitBreaker.melt(service, state.circuit_breaker)
 

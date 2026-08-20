@@ -11,8 +11,27 @@ defmodule ExternalService.Test.ClusterHelper do
 
   @retry_options [base: 1, max_attempts: 5]
 
-  @doc "Trips `service`'s circuit breaker by failing every attempt."
+  @doc """
+  Trips `service`'s circuit breaker by failing calls until it opens, and returns
+  the `ExternalService.CircuitBreakerOpen` error from a call it then rejects.
+
+  Written as "fail until open, then one more" rather than "one failing call" so
+  that it reads the same under either `:melt` setting. Under the default
+  `:per_call`, a call charges the breaker once when its retrying gives up — so it
+  takes `:tolerate` + 1 calls to open the breaker, and the call that opens it
+  still reports its own failure rather than a rejection. Under `:per_attempt` a
+  single call can do it, and this simply stops after one.
+  """
   def trip(service) do
+    Enum.reduce_while(1..20, nil, fn _attempt, _acc ->
+      if ExternalService.blown?(service) do
+        {:halt, :ok}
+      else
+        ExternalService.call(service, @retry_options, &always_retry/0)
+        {:cont, nil}
+      end
+    end)
+
     ExternalService.call(service, @retry_options, &always_retry/0)
   end
 

@@ -107,9 +107,19 @@ defmodule ExternalService.CircuitBreaker.ClusterTest do
     test "tripping through a guarded call broadcasts" do
       service = start_clustered(unique_service())
 
+      # `tolerate: 2` with the default `melt: :per_call`: a failing call charges
+      # the breaker once, when its retrying gives up, so it takes three of them.
+      # The call that opens the breaker still reports its own failure — only the
+      # next one is rejected.
+      for _ <- 1..3 do
+        assert {:error, %ExternalService.RetriesExhausted{}} =
+                 ExternalService.call(service, [base: 1, max_attempts: 5], fn -> :retry end)
+      end
+
       assert {:error, %ExternalService.CircuitBreakerOpen{}} =
                ExternalService.call(service, [base: 1, max_attempts: 5], fn -> :retry end)
 
+      # Still one broadcast: only the closed-to-open transition is sent.
       assert broadcast_count() == 1
       assert ExternalService.blown?(service)
     end

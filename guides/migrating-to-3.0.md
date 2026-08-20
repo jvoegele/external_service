@@ -23,10 +23,13 @@ each has a one-line way to keep the old behavior if it was what you wanted.
 | Retry bound                   | unbounded — retries forever                  | `max_attempts: 5`                         | `retry: [max_attempts: :infinity]` |
 | Rate limit wait               | unbounded — sleeps until admitted            | one window (`:per`), capped at 5s         | `rate_limit: [wait: :infinity]` |
 | `:expiry` under 100ms         | floors the last delay at 100ms and adds an attempt | trims the last delay to the budget  | no equivalent — see below     |
+| Circuit breaker `:tolerate`   | counts failing **attempts**                  | counts failing **calls**                  | `circuit_breaker: [melt: :per_attempt]` |
 | `:decorator` dependency       | installed transitively                       | declare it yourself                       | add it to your `deps`         |
 
 The first two are silent: same code, different behavior. The third is silent but
-narrow. The fourth is loud — it fails your build with a clear message.
+narrow. The fifth is loud — it fails your build with a clear message. The fourth
+is the one to read carefully: it is silent, it is not narrow, and it changes what
+a number you have already tuned means.
 
 ## Have you been warned already?
 
@@ -160,7 +163,73 @@ that directly:
 retry: [max_attempts: 2, backoff: :linear, base: 100]
 ```
 
-## 4. `:decorator` is an optional dependency
+## 4. `:tolerate` counts calls, not attempts
+
+**Before:** every failing *attempt* melted the circuit breaker. A single `call/3`
+with `max_attempts: 5` contributed up to five melts, so `:tolerate` and
+`:max_attempts` could not be tuned independently — and raising the attempt count
+made the breaker open *sooner*, because each call spent more of its budget.
+
+**Now:** a call melts the breaker once, when its retrying gives up. `tolerate: 3`
+means three failing calls, whatever `:max_attempts` is.
+
+### What to change
+
+Divide by your attempt count. If you followed the old guidance and sized
+`:tolerate` as *(calls you will absorb) × `:max_attempts`*, that multiplication is
+now done for you:
+
+```elixir
+# 2.x: "open after about three dead calls", with max_attempts: 5
+circuit_breaker: [tolerate: 15, within: :timer.seconds(5)]
+
+# 3.0: the same intent
+circuit_breaker: [tolerate: 3, within: :timer.seconds(5)]
+```
+
+Left alone, `tolerate: 15` now means fifteen failing calls, so your breaker opens
+five times later than you intended. That is silent, and in the dangerous
+direction.
+
+### `:within` may need to be wider
+
+This is the part most easily missed. Melts used to be spread across a call's retry
+window; now each call contributes one melt at the moment it gives up, so `:within`
+has to span the interval across which `:tolerate` failing *calls* arrive. For fast
+calls that is easier than before. For slow ones it is not:
+
+```elixir
+# A background job whose calls take ~30s (max_attempts: :infinity, expiry: 30s).
+# 2.x: 20 melts arrived within one call, so a 30s window was ample.
+circuit_breaker: [tolerate: 20, within: :timer.seconds(30)]
+
+# 3.0: three failing calls take about 90s, so a 30s window never sees them all.
+circuit_breaker: [tolerate: 3, within: :timer.seconds(120)]
+```
+
+### Unbounded retrying now needs a time budget
+
+Under `:per_call`, a call that never gives up never melts — so
+`max_attempts: :infinity` with no `:expiry` would retry forever with nothing to
+stop it. That combination now raises, at `start/2` and at any `call/3` that
+overrides its way into it. Add the budget:
+
+```elixir
+retry: [max_attempts: :infinity, expiry: :timer.seconds(30)]
+```
+
+### Keeping the 2.x behavior
+
+One option, and everything above stops applying:
+
+```elixir
+circuit_breaker: [melt: :per_attempt]
+```
+
+That is the honest choice if you rely on a single unbounded call being halted by
+its own breaker, which only attempt-counting can do.
+
+## 5. `:decorator` is an optional dependency
 
 `ExternalService.Decorator` — the `@decorate external_call` annotations — is now
 behind an optional dependency, the same treatment `:flow` has always had. If you
@@ -188,6 +257,9 @@ one fewer transitive dependency.
 - [ ] For each warned service, decide: a real bound, or `max_attempts: :infinity` / `wait: :infinity` to keep 2.x behavior.
 - [ ] Set `wait: :infinity` explicitly on any service used from a Flow pipeline or background job.
 - [ ] Check for `:expiry` values under 100ms; if any, confirm the new attempt count and timing are what you want.
+- [ ] Divide every `:tolerate` by the `:max_attempts` it was sized against — it counts calls now.
+- [ ] Check `:within` is wide enough for `:tolerate` failing *calls* to arrive, not attempts. Slow services need a wider window than before.
+- [ ] Add an `:expiry` to any service retrying with `max_attempts: :infinity`, or set `circuit_breaker: [melt: :per_attempt]`.
 - [ ] Add `{:decorator, "~> 1.4"}` to your deps if you use `@decorate external_call`.
 - [ ] Add clauses for `ExternalService.RetriesExhausted` and `ExternalService.RateLimited` wherever a previously-unbounded call is handled — these are the errors that could not occur before.
 - [ ] Run your test suite. Tests that relied on a call blocking until success are the ones most likely to surface this.
