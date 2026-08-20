@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ## [Unreleased]
 
 ### Added
+- **`ExternalService.Insights`** — an opt-in telemetry handler that reports when a
+  configuration has stopped doing what it was set up to do
+  ([issue #95](https://github.com/jvoegele/external_service/issues/95)).
+
+      ExternalService.Insights.attach()
+
+  `explain/1` and `simulate/3` answer questions about a configuration from the
+  configuration. This answers the one they cannot: whether what is *happening*
+  matches it. The gap between the two is attempt duration, which nothing in a
+  configuration states — so a breaker sized correctly on the day it was written
+  goes quietly inert when the dependency slows down, and the symptom is a service
+  failing every call with its breaker still closed.
+
+  Three findings, each naming the setting to change and a value to try: a breaker
+  that has absorbed more consecutive failures than it tolerates and is still
+  closed; calls taking much longer than their backoff accounts for; and traffic
+  that is succeeding only because retries are absorbing a fault, which the circuit
+  breaker deliberately cannot see.
+
+  Off by default and free until attached. Attached, it costs a fixed dozen
+  integers per service updated without locks, starts no process, and logs at most
+  once per service per interval. `ExternalService.Insights.report/1` returns the
+  same findings as data.
+
 - **`ExternalService.simulate/3`** — runs a configuration against a failing
   dependency on a virtual clock and reports what happened
   ([issue #94](https://github.com/jvoegele/external_service/issues/94)).

@@ -125,6 +125,42 @@ end
 Attach handlers once at application start (for example in your
 `Application.start/2`).
 
+## Insights: the handler this library ships
+
+Everything above is raw material. `ExternalService.Insights` is a handler built
+from it that watches for one specific thing: a configuration that has stopped
+doing what it was set up to do.
+
+```elixir
+# in your application's start/2, after the supervision tree is up
+ExternalService.Insights.attach()
+```
+
+```
+[ExternalService.Insights] :payments has failed 6 consecutive calls over 11.5s
+with its circuit breaker still closed. It tolerates 5 failures within 10s, but
+these are arriving about 2.3s apart, so at most 5 are ever counted together.
+
+    circuit_breaker: [within: :timer.seconds(28)]
+
+A failing call takes its retry window plus however long its attempts run for, and
+only the first of those is in the configuration — which is why a window that
+fitted when it was written stops fitting when the dependency slows down.
+```
+
+`ExternalService.explain/1` and `ExternalService.simulate/3` answer questions
+about a configuration from the configuration. This answers the one they cannot:
+whether what is *happening* matches it. The gap between the two is attempt
+duration, which nothing in a configuration states — so a breaker sized correctly
+on the day it was written goes quietly inert when the dependency slows down.
+
+It is off by default and free until attached: no handlers, no storage, no cost on
+any call. Attached, it costs a fixed dozen integers per service, updated without
+locks, and starts no process. Findings are also available as data through
+`ExternalService.Insights.report/1`, for a health endpoint or a test.
+
+See `ExternalService.Insights` for what it looks for and how to quiet it.
+
 ## With Telemetry.Metrics
 
 If you use [`Telemetry.Metrics`](https://hexdocs.pm/telemetry_metrics), the
