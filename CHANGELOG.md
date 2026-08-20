@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+- **Internal: extracted an ExternalService.Retry module**, so that retrying is owned by one
+  module the way the circuit breaker, rate limiter and concurrency limit each are
+  ([issue #86](https://github.com/jvoegele/external_service/issues/86)). It owns the
+  delay streams, the retry loop, and the decision about whether an outcome counts as
+  a retry at all. `ExternalService.RetryOptions` stays public and unchanged in shape —
+  it remains the per-call configuration type callers construct, validate and merge —
+  and simply no longer carries behavior. No public API moved and nothing observable
+  changed.
+
 ## [3.0.0-rc.1] - 2026-08-18
 
 3.0 changes four defaults and behaviors, and **renames nothing**. Your code

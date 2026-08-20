@@ -1,6 +1,7 @@
 defmodule ExternalService.DelayStreamTest do
   use ExUnit.Case, async: true
 
+  alias ExternalService.Retry
   alias ExternalService.RetryOptions
 
   # Characterization tests for the delays the retry loop actually sleeps for.
@@ -17,11 +18,11 @@ defmodule ExternalService.DelayStreamTest do
   # to make it pass.
 
   defp delays(opts, count) do
-    opts |> unbounded() |> RetryOptions.new() |> RetryOptions.delay_stream() |> Enum.take(count)
+    opts |> unbounded() |> RetryOptions.new() |> Retry.delay_stream() |> Enum.take(count)
   end
 
   defp all_delays(opts) do
-    opts |> unbounded() |> RetryOptions.new() |> RetryOptions.delay_stream() |> Enum.to_list()
+    opts |> unbounded() |> RetryOptions.new() |> Retry.delay_stream() |> Enum.to_list()
   end
 
   # Most of these tests are about the shape of the backoff rather than about where
@@ -58,7 +59,7 @@ defmodule ExternalService.DelayStreamTest do
     test "the defaults on their own describe five attempts across 150ms" do
       # Not routed through `unbounded/1`: this is the default configuration exactly
       # as a service that configures nothing would get it.
-      delays = [] |> RetryOptions.new() |> RetryOptions.delay_stream() |> Enum.to_list()
+      delays = [] |> RetryOptions.new() |> Retry.delay_stream() |> Enum.to_list()
 
       assert delays == [10, 20, 40, 80]
       assert Enum.sum(delays) == 150

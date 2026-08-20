@@ -61,6 +61,7 @@ defmodule ExternalService do
   alias ExternalService.RateLimited
   alias ExternalService.RateLimiter
   alias ExternalService.RetriesExhausted
+  alias ExternalService.Retry
   alias ExternalService.RetryOptions
   alias ExternalService.ServiceNotStarted
 
@@ -748,10 +749,7 @@ defmodule ExternalService do
       end
     end
 
-    retry_opts
-    |> RetryOptions.delay_stream()
-    |> run_attempts(attempt, state.sleep)
-    |> case do
+    case Retry.call(retry_opts, state.sleep, attempt) do
       {:no_retry, _} = result ->
         result
 
@@ -778,31 +776,6 @@ defmodule ExternalService do
       {:error, {:saturated, service}}
   end
 
-  # The retry loop. Each element of `delays` is how long to sleep *before* the
-  # attempt that follows it, so the first attempt is made immediately and the
-  # stream running out is what ends the retrying. An attempt that does not ask for
-  # another wins immediately; otherwise the last attempt's answer is the call's,
-  # which is how an exhausted call reports the reason it kept retrying.
-  #
-  # Sleeping goes through the service's `:sleep_function` so that a test can drive
-  # backoff without waiting for it.
-  defp run_attempts(delays, attempt, sleep) do
-    case attempt.() do
-      {:no_retry, _} = result -> result
-      retry -> retry_attempts(delays, attempt, sleep, retry)
-    end
-  end
-
-  defp retry_attempts(delays, attempt, sleep, first_retry) do
-    Enum.reduce_while(delays, first_retry, fn delay, _previous ->
-      sleep.(delay)
-      continue_unless_settled(attempt.())
-    end)
-  end
-
-  defp continue_unless_settled({:no_retry, _} = result), do: {:halt, result}
-  defp continue_unless_settled(retry), do: {:cont, retry}
-
   @spec try_function(service, State.t(), RetryOptions.t(), retriable_function) ::
           {:error, {:retry, any}}
           | {:error, :retry}
@@ -814,106 +787,39 @@ defmodule ExternalService do
     # it, so a caller sleeping on the `:wait` budget holds no slot: the limit
     # counts calls actually in flight against the service. It is per attempt,
     # so a call sitting in backoff between attempts holds nothing either.
-    guarded = fn -> Concurrency.call(state.concurrency, function) end
+    #
+    # Both limits are checked *around* the attempt rather than inside it, because
+    # neither produces something to retry: the wrapped function never ran. They
+    # are thrown rather than returned so that they escape the retry loop instead
+    # of being treated as a result to classify.
+    in_flight = fn -> Concurrency.call(state.concurrency, function) end
 
-    case RateLimiter.call(state.rate_limit, guarded) do
-      # No slot was free. The wrapped function never ran, so as with rate
-      # limiting there is nothing to retry and no failure to melt the breaker.
-      {Concurrency, :saturated} ->
-        throw(:saturated)
-
-      # The wrapped function never ran, so there is nothing to retry and no
-      # failure to hold against the circuit breaker. Thrown rather than returned
-      # so that it escapes the retry loop rather than being treated as a result.
-      {RateLimiter, :rate_limited, retry_after} ->
-        throw({:rate_limited, retry_after})
-
-      {:retry, reason} ->
-        emit_retry(service, reason)
-        melt(service, state)
-        {:error, {:retry, reason}}
-
-      :retry ->
-        emit_retry(service, :reason_unknown)
-        melt(service, state)
-        {:error, :retry}
-
-      result ->
-        maybe_retry_on_result(service, state, retry_opts.retry_on, result)
-    end
-  rescue
-    error ->
-      # A raised exception only counts as a failure (melting the circuit breaker)
-      # when it is one we would retry on. Exceptions not matched by `:retry_exceptions`
-      # propagate untouched and leave the breaker alone — `:retry_exceptions` governs
-      # both retrying and melting.
-      if retriable_exception?(service, error, retry_opts.retry_exceptions) do
-        emit_retry(service, error)
-        melt(service, state)
-        {:error, {:retry_exception, error, __STACKTRACE__}}
-      else
-        reraise error, __STACKTRACE__
+    guarded = fn ->
+      case RateLimiter.call(state.rate_limit, in_flight) do
+        {Concurrency, :saturated} -> throw(:saturated)
+        {RateLimiter, :rate_limited, retry_after} -> throw({:rate_limited, retry_after})
+        result -> result
       end
+    end
+
+    service
+    |> Retry.attempt(retry_opts, guarded)
+    |> record_attempt(service, state)
+  end
+
+  # What a retriable failure costs the service. `Retry` decides *whether* an
+  # attempt wants another; this is where that decision is charged to the circuit
+  # breaker and reported to telemetry, because both are about composing mechanisms
+  # rather than about retrying.
+  defp record_attempt({:no_retry, _} = result, _service, _state), do: result
+
+  defp record_attempt(retry, service, state) do
+    emit_retry(service, Retry.reason(retry))
+    melt(service, state)
+    retry
   end
 
   defp melt(service, state), do: CircuitBreaker.melt(service, state.circuit_breaker)
-
-  # When a `:retry_on` predicate is configured, a result it matches is treated as a
-  # retry — melting the breaker and using the result itself as the retry reason —
-  # exactly like an explicit `:retry` return (which is handled before we get here,
-  # so an explicit return always takes precedence). With no predicate, or when it
-  # does not match, the result is returned untouched.
-  defp maybe_retry_on_result(_service, _state, nil, result), do: {:no_retry, result}
-
-  defp maybe_retry_on_result(service, state, predicate, result) when is_function(predicate, 1) do
-    if apply_predicate(service, :retry_on, predicate, result) do
-      emit_retry(service, result)
-      melt(service, state)
-      {:error, {:retry, result}}
-    else
-      {:no_retry, result}
-    end
-  end
-
-  # `:retry_exceptions` is either a list of exception modules — an exception is
-  # retriable when its struct is one of them — or a predicate on the exception
-  # itself, which can decide per instance rather than per type.
-  defp retriable_exception?(service, error, predicate) when is_function(predicate, 1) do
-    apply_predicate(service, :retry_exceptions, predicate, error)
-  end
-
-  defp retriable_exception?(_service, error, retry_exceptions) when is_list(retry_exceptions) do
-    Enum.any?(retry_exceptions, fn module -> is_struct(error, module) end)
-  end
-
-  # A retry predicate is arbitrary user code, and `:retry_exceptions` runs it on a
-  # path that is already failing — so a bug in the predicate would otherwise become
-  # the failure the caller sees, in place of the exception it was called to
-  # classify. Any way of not returning an answer (raise, throw, or exit) is treated
-  # as "this predicate did not classify the value", which means no retry: retrying
-  # is the consequential interpretation, and a predicate that just crashed has
-  # demonstrated it cannot authorize it. The call's own result or exception is left
-  # exactly as it was, and the warning is what makes the broken predicate findable.
-  defp apply_predicate(service, option, predicate, value) do
-    !!predicate.(value)
-  rescue
-    error -> predicate_failed(service, option, :error, error, __STACKTRACE__)
-  catch
-    kind, reason -> predicate_failed(service, option, kind, reason, __STACKTRACE__)
-  end
-
-  defp predicate_failed(service, option, kind, reason, stacktrace) do
-    Logger.warning("""
-    The #{inspect(option)} predicate for #{inspect(service)} did not return, so the \
-    call was treated as not retriable and its own result or exception was left \
-    untouched. Fix the predicate: it must answer for every value it can be given, \
-    including ones it does not recognise.
-
-    #{Exception.format(kind, reason, stacktrace)}\
-    """)
-
-    false
-  end
 
   defp retries_exhausted(service, reason) do
     # The retry reason can be any term, so it is carried in `:context` rather than
