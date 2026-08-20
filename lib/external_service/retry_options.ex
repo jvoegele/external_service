@@ -156,6 +156,55 @@ defmodule ExternalService.RetryOptions do
   end
 
   @doc """
+  Total time a fully-failing call spends *waiting between* attempts, in
+  milliseconds.
+
+  This is the number to compare against the latency budget of whoever is calling,
+  and the one the circuit breaker's `:within` window has to be at least as wide as.
+  Accepts a struct or the same keyword list `new/1` does.
+
+      iex> RetryOptions.window(base: 100, max_attempts: 5)
+      1500
+
+      iex> RetryOptions.window(base: 100, max_attempts: 10)
+      51100
+
+      iex> RetryOptions.window(base: 100, max_attempts: 10, cap: 1_000)
+      6500
+
+  Note what it is *not*: the time the call takes. Nothing here bounds a single
+  attempt, so a call's real duration is this plus however long its attempts run
+  for — see [Nothing here bounds a single
+  attempt](retries.md#nothing-here-bounds-a-single-attempt).
+
+  ## Bounds
+
+  With `:max_attempts` set (it defaults to `5`) the window is what the delays add
+  up to. Without it, an `:expiry` is the answer, because unbounded retrying spends
+  that budget exactly:
+
+      iex> RetryOptions.window(base: 500, max_attempts: :infinity, expiry: 30_000)
+      30000
+
+  With neither bound there is no window to report:
+
+      iex> RetryOptions.window(base: 500, max_attempts: :infinity)
+      :infinity
+
+  ## Jitter
+
+  The window is reported nominally: `:jitter` is deliberately not sampled, so that
+  the same configuration always reports the same window. A jittered call waits
+  within that option's proportion of this figure — `true` meaning +/- 10% — rather
+  than exactly it.
+
+      iex> RetryOptions.window(base: 100, max_attempts: 5, jitter: true)
+      1500
+  """
+  @spec window(t() | keyword()) :: non_neg_integer() | :infinity
+  def window(retry_options), do: retry_options |> new() |> ExternalService.Retry.window()
+
+  @doc """
   Layers a keyword list of per-call overrides onto a `base` struct.
 
   Only the keys actually present in `opts` are overridden; every other field is
