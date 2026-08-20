@@ -1,4 +1,13 @@
 defmodule ExternalService.RetryOptions do
+  # This schema lives here while `:circuit_breaker`, `:rate_limit` and
+  # `:concurrency` live in `external_service.ex`, which looks arbitrary and is not.
+  # Those three are only ever given to `start/2`, and are documented there by
+  # `NimbleOptions.docs/1`. Retry options are additionally passed *per call*, so
+  # this module is public and renders its own schema into its own moduledoc — which
+  # needs the schema local to it.
+  #
+  # The behavior these options describe lives in `ExternalService.Retry`; this
+  # module is configuration only.
   @schema [
     backoff: [
       type: {:in, [:exponential, :linear]},
@@ -145,131 +154,6 @@ defmodule ExternalService.RetryOptions do
     validated = NimbleOptions.validate!(opts, @validated_schema)
     struct(__MODULE__, validated)
   end
-
-  @doc false
-  # The stream of delays, in milliseconds, that these options describe — one
-  # element per retry, so an `n`-element stream means at most `n + 1` attempts.
-  # The retry loop sleeps for each element in turn and stops when the stream is
-  # exhausted.
-  #
-  # This is not part of the public API, but it is the seam the delay behavior is
-  # tested through: the sequence can be inspected without waiting for it.
-  @spec delay_stream(t()) :: Enumerable.t()
-  def delay_stream(%__MODULE__{} = retry_opts) do
-    retry_opts
-    |> backoff_stream()
-    |> apply_jitter(retry_opts.jitter)
-    |> apply_cap(retry_opts.cap)
-    |> apply_expiry(retry_opts.expiry)
-    |> apply_max_attempts(retry_opts.max_attempts)
-  end
-
-  # The delay-stream builders below were originally provided by
-  # `Retry.DelayStreams` from ElixirRetry (https://github.com/safwank/ElixirRetry,
-  # Copyright 2014 Safwan Kamarrudin, Apache License 2.0), and are reimplemented
-  # here so that the retry loop — and the sleeping it does — belongs to this
-  # library. `delay_stream_test.exs` pins the sequences.
-  #
-  # They were ported behavior-for-behavior, and the backoff, jitter and cap
-  # builders still are. `:expiry` has since diverged deliberately: it no longer
-  # floors its final delay at 100ms, so a budget smaller than that is honored
-  # rather than rounded up (issue #70).
-
-  # Exponential backoff doubles the previous delay. `:factor` is not consulted:
-  # it belongs to linear backoff, where it is the increment.
-  defp backoff_stream(%__MODULE__{backoff: :exponential, base: base}) do
-    Stream.unfold(base, fn previous -> {previous, previous * 2} end)
-  end
-
-  # Linear backoff adds `:factor` to the base delay once per retry taken.
-  defp backoff_stream(%__MODULE__{backoff: :linear, base: base, factor: factor}) do
-    Stream.unfold(0, fn retries -> {base + retries * factor, retries + 1} end)
-  end
-
-  # `jitter` accepts a boolean or an explicit proportion, with `true` meaning the
-  # conventional +/- 10%.
-  defp apply_jitter(stream, proportion) when is_number(proportion),
-    do: randomize(stream, proportion)
-
-  defp apply_jitter(stream, true), do: randomize(stream, 0.1)
-  defp apply_jitter(stream, _falsy), do: stream
-
-  # The shift spans `1 - max_delta` to `max_delta` rather than being symmetric
-  # about zero, because `:rand.uniform/1` starts at 1. Delays are clamped at zero
-  # so that jitter can never turn a short delay negative.
-  defp randomize(stream, proportion) do
-    Stream.map(stream, fn delay ->
-      max_delta = round(delay * proportion)
-      shift = random_uniform(2 * max_delta) - max_delta
-
-      max(delay + shift, 0)
-    end)
-  end
-
-  defp random_uniform(n) when n <= 0, do: 0
-  defp random_uniform(n), do: :rand.uniform(n)
-
-  # A cap clamps each delay without ending the stream — retrying continues, just
-  # never further apart than this.
-  defp apply_cap(stream, nil), do: stream
-  defp apply_cap(stream, cap), do: Stream.map(stream, &min(&1, cap))
-
-  # Both bounds distinguish `nil` (never set) from `:infinity` (explicitly
-  # unbounded) so that `start/2` can warn about the former, but the two behave
-  # identically here: neither limits the delay stream.
-  defp apply_expiry(stream, unbounded) when unbounded in [nil, :infinity], do: stream
-
-  defp apply_expiry(stream, expiry) do
-    Stream.resource(
-      fn -> {stream, now_ms() + expiry} end,
-      fn
-        :at_end -> {:halt, :at_end}
-        {remaining, deadline} -> next_delay_within(remaining, deadline)
-      end,
-      fn _ -> :ok end
-    )
-  end
-
-  # The budget is measured from the first time a delay is asked for — that is,
-  # after the initial attempt has already run — so it bounds the retrying rather
-  # than the call as a whole.
-  #
-  # The budget is spent, never overshot, and never abandoned early. A preferred
-  # delay that still fits is used as-is; one that would overshoot is trimmed to
-  # whatever is left, which places the final attempt exactly at the deadline. Only
-  # a budget with nothing left in it stops without a further attempt.
-  #
-  # Trimming rather than halting matters more than it looks: halting on the first
-  # delay that would overshoot abandons most of the budget under exponential
-  # backoff — 630ms of a 1000ms budget, 2550ms of 5000ms — because the delay that
-  # does not fit is roughly as large as everything before it combined.
-  defp next_delay_within(remaining, deadline) do
-    case Enum.take(remaining, 1) do
-      [preferred] ->
-        left = deadline - now_ms()
-
-        cond do
-          left <= 0 -> {:halt, :at_end}
-          preferred >= left -> {[left], :at_end}
-          true -> {[preferred], {Stream.drop(remaining, 1), deadline}}
-        end
-
-      [] ->
-        {:halt, :at_end}
-    end
-  end
-
-  # Monotonic rather than system time, so that a clock adjustment mid-call cannot
-  # stretch or collapse a retry budget.
-  defp now_ms, do: System.monotonic_time(:millisecond)
-
-  # `max_attempts` counts the initial attempt plus retries, so the delay stream
-  # (one delay per retry) is limited to `max_attempts - 1` elements.
-  defp apply_max_attempts(stream, unbounded) when unbounded in [nil, :infinity], do: stream
-
-  defp apply_max_attempts(stream, max_attempts)
-       when is_integer(max_attempts) and max_attempts > 0,
-       do: Stream.take(stream, max_attempts - 1)
 
   @doc """
   Layers a keyword list of per-call overrides onto a `base` struct.
