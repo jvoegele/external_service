@@ -985,6 +985,120 @@ defmodule ExternalServiceTest do
     end
   end
 
+  describe "within: :auto" do
+    # A flat `:within` has no relationship to the retry configuration it has to be
+    # wider than, and stops fitting the moment someone raises `:base` — which is
+    # the recommended first move for an HTTP dependency. `:auto` reads it off the
+    # retry options instead.
+
+    defp installed_within(service) do
+      {ExternalService.CircuitBreaker.Fuse, {{:standard, _tolerate, within}, _reset}} =
+        ExternalService.State.get(service).circuit_breaker
+
+      within
+    end
+
+    test "the default configuration keeps the 10 second window it always had" do
+      # tolerate: 10 against a 150ms retry window is 1.5s, which is narrower than
+      # the flat default — so the floor is what applies. `:auto` only ever widens.
+      service = start_fuse(:"auto-default", circuit_breaker: [melt: :per_call])
+
+      assert installed_within(service) == 10_000
+    end
+
+    test "widens for a service whose failing calls are slow" do
+      # The background-job shape: calls take ~30s, so three of them span 90s and a
+      # 10s window would never see them all.
+      service =
+        start_fuse(:"auto-slow",
+          circuit_breaker: [tolerate: 3, melt: :per_call],
+          retry: [max_attempts: :infinity, expiry: 30_000]
+        )
+
+      assert installed_within(service) == 90_000
+    end
+
+    test "scales with :tolerate, because each call melts once" do
+      for tolerate <- [3, 10, 25] do
+        service =
+          start_fuse(:"auto-tolerate-#{tolerate}",
+            circuit_breaker: [tolerate: tolerate, melt: :per_call],
+            retry: [base: 100, max_attempts: 8]
+          )
+
+        # A 12.7s retry window per call.
+        assert installed_within(service) == 12_700 * tolerate
+      end
+    end
+
+    test "under :per_attempt it is one call's own retry window, not :tolerate of them" do
+      # Per-attempt melting spreads a single call's melts across that call's retry
+      # window, so the window only has to be that wide for them to accumulate.
+      service =
+        start_fuse(:"auto-per-attempt",
+          circuit_breaker: [tolerate: 10, melt: :per_attempt],
+          retry: [base: 500, max_attempts: 8]
+        )
+
+      assert installed_within(service) == 63_500
+    end
+
+    test "an explicit window is left exactly as given, wide or narrow" do
+      for within <- [1, 2_500, 600_000] do
+        service =
+          start_fuse(:"auto-explicit-#{within}",
+            circuit_breaker: [tolerate: 3, within: within],
+            retry: [base: 500, max_attempts: 8]
+          )
+
+        assert installed_within(service) == within
+      end
+    end
+
+    test "falls back to the floor when there is no window to size against" do
+      # Unbounded retrying has no retry window; only `:per_attempt` can ask for it.
+      service =
+        start_fuse(:"auto-unbounded",
+          circuit_breaker: [tolerate: 5, melt: :per_attempt],
+          retry: [max_attempts: :infinity]
+        )
+
+      assert installed_within(service) == 10_000
+    end
+
+    test "a breaker that never opens needs no window" do
+      service = start_fuse(:"auto-infinite-tolerate", circuit_breaker: [tolerate: :infinity])
+
+      assert ExternalService.State.get(service).circuit_breaker ==
+               {ExternalService.CircuitBreaker.Fuse, :never_opens}
+    end
+
+    test "the window it computes is one three failing calls actually fit inside" do
+      # The arithmetic is only worth having if the breaker it produces opens. This
+      # is the case guides/tuning.md found broken: retries spread wider than the
+      # window, so melts never accumulated.
+      service =
+        start_fuse(:"auto-opens",
+          circuit_breaker: [tolerate: 3, melt: :per_call],
+          retry: [backoff: :exponential, base: 100, max_attempts: 5],
+          # Four failing calls at a 1.5s retry window each is six seconds of
+          # sleeping to prove an arithmetic point. The delays are asserted where
+          # they belong, in delay_stream_test.exs.
+          sleep_function: fn _milliseconds -> :ok end
+        )
+
+      assert installed_within(service) == 10_000
+
+      for _ <- 1..3 do
+        assert {:error, %RetriesExhausted{}} =
+                 ExternalService.call(service, fn -> :retry end)
+      end
+
+      assert {:error, %RetriesExhausted{}} = ExternalService.call(service, fn -> :retry end)
+      assert ExternalService.blown?(service)
+    end
+  end
+
   describe "melt semantics" do
     # The 3.0 default. `guides/tuning.md` exists largely because these two numbers
     # used to be entangled: `:tolerate` counted attempts, so it could not be tuned

@@ -49,6 +49,25 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   observable.
 
 ### Added
+- **The circuit breaker's `:within` now defaults to `:auto`**, sizing the
+  failure-counting window against the retry options rather than being a flat
+  `10_000` with no relationship to them
+  ([issue #92](https://github.com/jvoegele/external_service/issues/92)). A flat
+  window stops fitting the moment someone raises `:base`, which is the usual first
+  move for an HTTP dependency — and a window narrower than the failures it has to
+  count is a breaker that never opens.
+
+  `:auto` reads what it needs from the retry options and the `:melt` setting: with
+  the default `melt: :per_call` a call melts once, so `:tolerate` of them span
+  `:tolerate` retry windows; with `melt: :per_attempt` a single call's melts are
+  spread across its own retry window. It is a **floor**, never narrower than the
+  10 seconds it replaces, so no existing service gets a narrower window than it
+  had. An explicit `:within` is left exactly as given.
+
+  What it cannot know is attempt duration: a failing call takes its retry window
+  plus however long its attempts run for, and no configuration states the latter.
+  Size `:within` yourself when your dependency's attempts are slow.
+
 - **`ExternalService.RetryOptions.window/1`** — the total time a fully-failing call
   spends waiting between attempts, for a set of retry options
   ([issue #90](https://github.com/jvoegele/external_service/issues/90)). This is the
