@@ -13,7 +13,7 @@ Add `external_service` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:external_service, "~> 2.0"}
+    {:external_service, "~> 3.0"}
   ]
 end
 ```

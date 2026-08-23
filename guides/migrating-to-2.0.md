@@ -10,7 +10,7 @@ The changes are real but the upgrade is mostly find-and-replace. Work through th
 sections below in order; each shows the 1.x form and its 2.0 replacement.
 
 > A complete, categorized list of changes is in the
-> [CHANGELOG](changelog.html). This guide focuses on _what you have to do_ to
+> [CHANGELOG](../CHANGELOG.md). This guide focuses on _what you have to do_ to
 > upgrade.
 
 ## At a glance
