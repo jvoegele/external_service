@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-08-23
+
+Two testing modules and one diagnostic fix. Nothing here changes how a guarded
+call behaves — `ExternalService.Test` and `ExternalService.Test.Coverage` are new
+surface for test suites, and the third item moves a compile-time warning onto a
+more useful line.
+
 ### Added
 - **`ExternalService.Test`, ExUnit helpers for the four things the
   [Testing](guides/testing.md) guide otherwise asks you to hand-write**
@@ -1327,7 +1334,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/3.0.0...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/3.1.0...HEAD
+[3.1.0]: https://github.com/jvoegele/external_service/compare/3.0.0...3.1.0
 [3.0.0]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.4...3.0.0
 [3.0.0-rc.4]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.3...3.0.0-rc.4
 [3.0.0-rc.3]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.2...3.0.0-rc.3
