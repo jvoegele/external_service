@@ -103,8 +103,14 @@ defmodule ExternalService.TestingGuideExamplesTest do
 
       # Still waited out the window in real time...
       assert elapsed >= 50_000
-      # ...having called the no-op sleep function thousands of times to do it.
-      assert Agent.get(spy, & &1) > 1_000
+
+      # ...having called the no-op sleep function over and over to do it. The
+      # bound is deliberately far below what any real spin produces: the count
+      # is a function of how fast the machine spins, not of the behavior under
+      # test, and a contended runner has measured as low as 453. What separates
+      # busy-waiting from a sleep that actually sleeps is re-entering the loop
+      # at all, not the rate.
+      assert Agent.get(spy, & &1) > 50
     end
   end
 

@@ -273,9 +273,59 @@ Note that a timeout bounds each call but does not bound how many are in flight a
 once. For that, see [Concurrency Limiting](concurrency.md) — and note the two go
 together, since a concurrency limit whose calls never finish just fills up.
 
+## When the client retries too
+
+The client is also where retries tend to live by default, and unlike the timeout,
+they are not wanted there.
+
+`Req` is the clearest case, because it retries out of the box: `retry:
+:safe_transient` retries **GET and HEAD** requests on 408/429/500/502/503/504 and
+on transport timeouts, refusals and closed connections, three times, with its own
+exponential backoff (roughly 0.9s, 2s, 4s). Wrapped in `call/3` that nests — each
+attempt this library makes becomes four requests:
+
+```
+max_attempts: 3, against a service returning 500
+
+Req defaults    12 requests
+retry: false     3 requests
+```
+
+Turn them off, and leave the client owning the timeout:
+
+```elixir
+# The client owns the timeout. ExternalService owns retrying.
+Req.get(url, retry: false, receive_timeout: :timer.seconds(5))
+```
+
+| Client | Retries on its own? |
+| --- | --- |
+| `Req` | **Yes.** Three retries on GET/HEAD. Pass `retry: false`. |
+| `Tesla` | No — `Tesla.Middleware.Retry` is opt-in. Leave it out of the stack. |
+| `Finch` | No, apart from re-dispatching a request whose HTTP/2 pool is draining. |
+| `:hackney`, `HTTPoison` | No. |
+
+The request count is the least of it. The retrying happens *below* `call/3`, so
+none of the four mechanisms can see it:
+
+- `[:external_service, :call, :retry]` never fires for those attempts, so the
+  retry rate in [Telemetry](telemetry.md) under-reports by whatever the client
+  did.
+- The breaker melts once per call that gives up, so a nested storm is one melt —
+  and none at all when the client's own retry eventually succeeds. The failures
+  it hid are the ones `:tolerate` was counting.
+- `ExternalService.explain/1`, `ExternalService.simulate/3` and
+  `ExternalService.Insights` describe a call profile your application does not
+  have, and the [compile-time configuration warnings](tuning.md) test `:within`
+  against a retry window that is not the real one.
+
+Everything in [Tuning](tuning.md) works out what a service will do from its
+configuration alone. A client retrying underneath makes those answers wrong
+without anything failing to say so.
+
 ## What this library does not bound
 
-One thing, and it is the one above:
+One thing, and it is [the hang](#when-the-service-hangs):
 
 | Not bounded | Where it belongs |
 | --- | --- |
