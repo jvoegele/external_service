@@ -408,3 +408,44 @@ your error handling — so keep some that do, using the techniques above. If wha
 you want is for the external call not to happen at all, stub at your own
 boundary, in the function you pass to `call/3`, rather than neutralizing the
 service around it.
+
+## Which paths your suite actually exercised
+
+That last point is advice with nothing behind it: nothing tells you whether you
+took it. A suite can make ten thousand guarded calls, every one on the happy
+path, and look exactly like a suite that exercises every failure path this
+library provides.
+
+`ExternalService.Test.Coverage` answers it, from the telemetry the library
+already emits:
+
+```elixir
+# test/test_helper.exs
+ExUnit.start()
+ExternalService.Test.Coverage.install_reporter()
+```
+
+```
+external_service coverage
+
+service             calls    retried     failed    breaker  throttled  saturated
+MyApp.Geocoder         44         12          4          0          0          0
+MyApp.Search          318          0          0          0          0          0  ⚠
+MyApp.Stripe         1204        142         31          3          7          0
+
+⚠ MyApp.Search was called 318 times and never once retried, failed, or was
+  rejected. Its `:retry` returns, its fallback path and its error handling are
+  not covered by this suite.
+```
+
+Every count is a number of *calls*, so they are all comparable with the first
+column — a call that retried four times counts once.
+
+A row of zeros is a **prompt, not a verdict**. A dependency you stub at your own
+boundary is supposed to have zeros; that is the recommendation directly above.
+What the report is for is the service you *believed* you were testing. It is
+never a threshold and never a build failure.
+
+The counts can also be read mid-suite, without the reporter, which makes "assert
+this test exercised the breaker" a thing you can write directly — see
+`ExternalService.Test.Coverage.entries/0`.

@@ -45,6 +45,42 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   The guide keeps every explanation and loses the boilerplate — these replace the
   typing, not the model.
 
+- **`ExternalService.Test.Coverage`, which resilience paths your suite actually
+  exercised** ([issue #111](https://github.com/jvoegele/external_service/issues/111)).
+
+  ```elixir
+  # test/test_helper.exs
+  ExUnit.start()
+  ExternalService.Test.Coverage.install_reporter()
+  ```
+
+  ```
+  external_service coverage
+
+  service             calls    retried     failed    breaker  throttled  saturated
+  MyApp.Geocoder         44         12          4          0          0          0
+  MyApp.Search          318          0          0          0          0          0  ⚠
+  MyApp.Stripe         1204        142         31          3          7          0
+
+  ⚠ MyApp.Search was called 318 times and never once retried, failed, or was
+    rejected. Its `:retry` returns, its fallback path and its error handling are
+    not covered by this suite.
+  ```
+
+  [Testing](guides/testing.md) has always ended on "an inert service is not a
+  tested one," with nothing behind it: a suite making ten thousand happy-path
+  calls looks exactly like one that exercises every failure path. This counts
+  them, from telemetry the library already emits — so there is no instrumentation
+  to enable and no build that differs.
+
+  Every count is a number of **calls**, not of events, so all of them are
+  comparable with the first column: a call that retried four times counts once.
+  A row of zeros is a *prompt, not a verdict* — a dependency stubbed at your own
+  boundary is supposed to have zeros. Never a threshold, never a build failure.
+
+  `entries/0` can be read mid-suite without the reporter, which makes "assert
+  this test exercised the breaker" something you can write directly.
+
 ### Changed
 - **Compile-time configuration warnings now anchor at the `use ExternalService`
   call** ([issue #119](https://github.com/jvoegele/external_service/issues/119)).
