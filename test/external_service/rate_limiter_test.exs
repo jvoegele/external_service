@@ -2,7 +2,7 @@ defmodule ExternalService.RateLimiterTest do
   use ExUnit.Case
 
   alias ExternalService.RateLimiter
-  alias ExternalService.Test.StubLimiter
+  alias ExternalService.TestSupport.StubLimiter
 
   @moduletag capture_log: true
 

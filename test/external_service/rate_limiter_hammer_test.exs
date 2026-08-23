@@ -10,7 +10,7 @@ defmodule ExternalService.RateLimiter.HammerTest do
 
   alias ExternalService.RateLimited
   alias ExternalService.RateLimiter.Hammer, as: HammerBackend
-  alias ExternalService.Test.HammerLimiter
+  alias ExternalService.TestSupport.HammerLimiter
 
   @moduletag capture_log: true
 

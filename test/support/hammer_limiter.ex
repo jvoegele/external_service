@@ -1,4 +1,4 @@
-defmodule ExternalService.Test.HammerLimiter do
+defmodule ExternalService.TestSupport.HammerLimiter do
   @moduledoc false
 
   # A real Hammer rate limiter, used to verify that

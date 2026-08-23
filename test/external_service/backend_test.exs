@@ -9,8 +9,8 @@ defmodule ExternalService.BackendTest do
 
   alias ExternalService.CircuitBreaker
   alias ExternalService.RateLimiter
-  alias ExternalService.Test.StubBreaker
-  alias ExternalService.Test.StubLimiter
+  alias ExternalService.TestSupport.StubBreaker
+  alias ExternalService.TestSupport.StubLimiter
 
   @moduletag capture_log: true
 

@@ -1,4 +1,4 @@
-defmodule ExternalService.Test.ClusterHelper do
+defmodule ExternalService.TestSupport.ClusterHelper do
   @moduledoc false
 
   # Helpers invoked on a remote node in the distributed circuit breaker tests.

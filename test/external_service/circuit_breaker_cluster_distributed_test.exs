@@ -14,7 +14,7 @@ defmodule ExternalService.CircuitBreaker.ClusterDistributedTest do
 
   alias ExternalService.CircuitBreaker.Cluster
   alias ExternalService.CircuitBreakerOpen
-  alias ExternalService.Test.ClusterHelper
+  alias ExternalService.TestSupport.ClusterHelper
 
   @moduletag :distributed
   @moduletag capture_log: true
