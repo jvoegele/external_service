@@ -4,7 +4,7 @@ defmodule ExternalService.RetryPlanPropertyTest do
 
   alias ExternalService.Retry
   alias ExternalService.RetryOptions
-  alias ExternalService.Test.Generators
+  alias ExternalService.TestSupport.Generators
 
   # Invariants of the delay plan, over options generated from the schema rather
   # than from a matrix someone maintains. `delay_stream_test.exs` still pins the

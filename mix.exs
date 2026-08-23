@@ -16,7 +16,11 @@ defmodule ExternalService.Mixfile do
       # Dialyzer: keep PLTs in a stable, cacheable location for CI
       dialyzer: [
         plt_local_path: "priv/plts",
-        plt_core_path: "priv/plts"
+        plt_core_path: "priv/plts",
+        # `ExternalService.Test` calls into ExUnit from `lib/`, the way
+        # `Phoenix.ConnTest` and `Bond.Test` do. ExUnit ships with Elixir, so
+        # this adds it to the PLT rather than adding a dependency.
+        plt_add_apps: [:ex_unit]
       ],
 
       # Hex

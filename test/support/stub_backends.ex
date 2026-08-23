@@ -1,4 +1,4 @@
-defmodule ExternalService.Test.StubLimiter do
+defmodule ExternalService.TestSupport.StubLimiter do
   @moduledoc false
 
   # A rate limiter backend that answers from the calling process's dictionary, so
@@ -45,7 +45,7 @@ defmodule ExternalService.Test.StubLimiter do
   def reset, do: Process.delete(@denials)
 end
 
-defmodule ExternalService.Test.StubBreaker do
+defmodule ExternalService.TestSupport.StubBreaker do
   @moduledoc false
 
   # A circuit breaker backend that records every operation in the calling

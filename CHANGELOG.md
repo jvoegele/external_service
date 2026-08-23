@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **`ExternalService.Test`, ExUnit helpers for the four things the
+  [Testing](guides/testing.md) guide otherwise asks you to hand-write**
+  ([issue #110](https://github.com/jvoegele/external_service/issues/110)).
+  `use ExternalService.Test` imports them; it is exactly `import ExternalService.Test`.
+
+  ```elixir
+  use ExternalService.Test
+
+  setup :record_events
+
+  test "retries a 503, then fails fast once the breaker is open" do
+    ExternalService.call(service, fn -> {:retry, :service_unavailable} end)
+    assert_retried(service, reason: :service_unavailable)
+
+    trip_breaker(service)
+
+    assert {:error, %ExternalService.CircuitBreakerOpen{}} =
+             ExternalService.call(service, fn -> flunk("should not run") end)
+  end
+  ```
+
+  | Helper | Replaces |
+  | --- | --- |
+  | `trip_breaker/1` | melting `:tolerate` + 1 times, with the off-by-one written out in your test |
+  | `exhaust_rate_limit/1` | spending `:limit` calls' worth of budget by hand |
+  | `record_events/0`, `assert_retried/2`, `refute_retried/2`, `assert_breaker_blown/2`, `assert_throttled/2` | twelve lines of `:telemetry.attach` per test, plus remembering that handler IDs are global |
+  | `recording_sleep/1`, `assert_slept/1` | a hand-rolled `:sleep_function` shim |
+
+  The two that read configuration do so off the started service, so the numbers
+  are not restated in your tests and cannot drift from the configuration. The
+  assertions return the telemetry metadata they matched, so further assertions
+  compose. `refute_retried/2` is there because a retry that did *not* happen
+  leaves nothing in a call's return value to assert on instead.
+
+  The guide keeps every explanation and loses the boilerplate — these replace the
+  typing, not the model.
+
 ### Changed
 - **Compile-time configuration warnings now anchor at the `use ExternalService`
   call** ([issue #119](https://github.com/jvoegele/external_service/issues/119)).
@@ -32,6 +70,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   carry no line metadata and neither do literal values, so `within: :timer.seconds(30)`
   is locatable while `within: 30_000` is not. One anchor that is always the same
   beats a warning that moves depending on how the reader wrote a number.
+- **Test-support modules moved from `ExternalService.Test.*` to
+  `ExternalService.TestSupport.*`.** They are compiled only in `:test` and have
+  never been packaged, so nothing downstream can be affected; the rename keeps
+  them from reading as children of the now-public `ExternalService.Test`.
 
 ## [3.0.0] - 2026-08-23
 

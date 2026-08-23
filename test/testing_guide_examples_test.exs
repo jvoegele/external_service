@@ -11,6 +11,7 @@ defmodule ExternalService.TestingGuideExamplesTest do
   """
 
   use ExUnit.Case, async: true
+  use ExternalService.Test
 
   alias ExternalService.CircuitBreaker
   alias ExternalService.CircuitBreakerOpen
@@ -21,6 +22,8 @@ defmodule ExternalService.TestingGuideExamplesTest do
   # Every test gets its own service term, so nothing here shares a breaker or a
   # rate-limit bucket with anything else. This is the guide's central point about
   # `async: true`.
+  setup :record_events
+
   setup context do
     service = :"#{context.module}.#{context.test}"
     on_exit(fn -> ExternalService.stop(service) end)
@@ -50,19 +53,15 @@ defmodule ExternalService.TestingGuideExamplesTest do
 
     test "a sleep function records the real backoff without waiting for it",
          %{service: service} do
-      test_process = self()
-
       ExternalService.start(service,
-        circuit_breaker: [tolerate: 100, within: :timer.seconds(10)],
+        circuit_breaker: [tolerate: 100],
         retry: [max_attempts: 4, backoff: :exponential, base: 100],
-        sleep_function: fn delay -> send(test_process, {:slept, delay}) end
+        sleep_function: recording_sleep()
       )
 
       ExternalService.call(service, fn -> :retry end)
 
-      assert_received {:slept, 100}
-      assert_received {:slept, 200}
-      assert_received {:slept, 400}
+      assert_slept([100, 200, 400])
     end
 
     test "wait: false keeps a rate limited test off the clock", %{service: service} do
@@ -123,8 +122,9 @@ defmodule ExternalService.TestingGuideExamplesTest do
 
       assert ExternalService.available?(service)
 
-      # `:tolerate` melts are tolerated; the next one opens the breaker.
-      Enum.each(1..3, fn _ -> CircuitBreaker.melt(service) end)
+      # Melts `:tolerate` + 1 times: `:tolerate` melts are tolerated, and the
+      # next one opens the breaker.
+      trip_breaker(service)
 
       assert ExternalService.blown?(service)
 
@@ -168,8 +168,7 @@ defmodule ExternalService.TestingGuideExamplesTest do
       )
 
       # Put the service right at its limit before the code under test runs.
-      assert RateLimiter.request(service) == :ok
-      assert RateLimiter.request(service) == :ok
+      exhaust_rate_limit(service)
 
       assert {:error, %RateLimited{}} =
                ExternalService.call(service, fn -> flunk("should not have run") end)
@@ -188,20 +187,6 @@ defmodule ExternalService.TestingGuideExamplesTest do
 
   describe "asserting on telemetry" do
     test "a retry emits [:external_service, :call, :retry]", %{service: service} do
-      test_process = self()
-      handler_id = "retry-handler-#{inspect(service)}"
-
-      :telemetry.attach(
-        handler_id,
-        [:external_service, :call, :retry],
-        fn _event, measurements, metadata, _config ->
-          send(test_process, {:retried, measurements, metadata})
-        end,
-        nil
-      )
-
-      on_exit(fn -> :telemetry.detach(handler_id) end)
-
       ExternalService.start(service,
         circuit_breaker: [tolerate: 100, within: :timer.seconds(10)],
         retry: [max_attempts: 2, backoff: :linear, base: 0]
@@ -209,8 +194,19 @@ defmodule ExternalService.TestingGuideExamplesTest do
 
       ExternalService.call(service, fn -> {:retry, :service_unavailable} end)
 
-      assert_received {:retried, _measurements,
-                       %{service: ^service, reason: :service_unavailable}}
+      assert_retried(service, reason: :service_unavailable)
+    end
+
+    test "the metadata comes back for further assertions", %{service: service} do
+      ExternalService.start(service,
+        circuit_breaker: [tolerate: 100, within: :timer.seconds(10)],
+        retry: [max_attempts: 2, backoff: :linear, base: 0]
+      )
+
+      ExternalService.call(service, fn -> {:retry, :service_unavailable} end)
+
+      metadata = assert_retried(service)
+      assert metadata.reason == :service_unavailable
     end
   end
 

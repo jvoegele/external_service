@@ -1,4 +1,4 @@
-defmodule ExternalService.Test.Generators do
+defmodule ExternalService.TestSupport.Generators do
   @moduledoc false
 
   # `StreamData` generators derived from the library's own option schemas.

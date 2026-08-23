@@ -2,7 +2,7 @@ defmodule ExternalService.GeneratorsTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias ExternalService.Test.Generators
+  alias ExternalService.TestSupport.Generators
 
   # The property suite generates option values by walking the library's own
   # schemas. That only stays true if it keeps up with them — a generator that
@@ -31,7 +31,7 @@ defmodule ExternalService.GeneratorsTest do
              The #{name} schema has options the property suite does not generate and does \
              not say why: #{inspect(unaccounted)}.
 
-             Either add a type to `ExternalService.Test.Generators.from_type/2`, or add the \
+             Either add a type to `ExternalService.TestSupport.Generators.from_type/2`, or add the \
              key to its `@ungeneratable` map with the reason it cannot be generated.
              """
     end

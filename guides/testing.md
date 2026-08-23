@@ -4,6 +4,11 @@ Once a guarded call is in your application, your tests have to get through it.
 This guide covers the sharp edges: keeping tests off the clock, isolating them
 from each other, and reaching the failure paths on purpose.
 
+`ExternalService.Test` ships the setup and assertions this guide would otherwise
+ask you to hand-write — `use ExternalService.Test` imports them, and each section
+below uses them where they apply. The explanations stay, because the helpers
+replace the typing, not the model.
+
 Every example here is executed as part of this library's own suite
 (`test/testing_guide_examples_test.exs`), so they compile and their assertions
 hold.
@@ -175,21 +180,21 @@ them:
 
 ```elixir
 test "backs off exponentially between attempts" do
-  test_process = self()
-
   ExternalService.start(service,
-    circuit_breaker: [tolerate: 100, within: :timer.seconds(10)],
+    circuit_breaker: [tolerate: 100],
     retry: [max_attempts: 4, backoff: :exponential, base: 100],
-    sleep_function: fn delay -> send(test_process, {:slept, delay}) end
+    sleep_function: recording_sleep()
   )
 
   ExternalService.call(service, fn -> :retry end)
 
-  assert_received {:slept, 100}
-  assert_received {:slept, 200}
-  assert_received {:slept, 400}
+  assert_slept([100, 200, 400])
 end
 ```
+
+`ExternalService.Test.assert_slept/1` takes the whole sequence rather than one
+delay at a time, because the sequence is what a backoff configuration determines
+— a test that checks only the first delay passes against the wrong `:backoff`.
 
 This is the one place a no-op sleep function is the right tool — the delays are a
 finite sequence, so skipping them ends the retrying sooner rather than spinning.
@@ -236,8 +241,7 @@ control API drives the breaker and the limiter directly.
 
 ### Opening the breaker
 
-`melt/1` reports a failure the library never saw. `:fuse` tolerates `:tolerate`
-melts and opens on the next, so `tolerate: n` needs `n + 1` melts:
+`ExternalService.Test.trip_breaker/1` opens it without a failing call:
 
 ```elixir
 ExternalService.start(service,
@@ -245,13 +249,20 @@ ExternalService.start(service,
   retry: [max_attempts: 1]
 )
 
-Enum.each(1..3, fn _ -> ExternalService.CircuitBreaker.melt(service) end)
+trip_breaker(service)
 
 assert ExternalService.blown?(service)
 
 assert {:error, %ExternalService.CircuitBreakerOpen{}} =
          ExternalService.call(service, fn -> flunk("should not run") end)
 ```
+
+Underneath it is `ExternalService.CircuitBreaker.melt/1`, which reports a failure
+the library never saw. The reason to use the helper rather than call `melt/1` in
+a loop is an off-by-one: `:fuse` tolerates `:tolerate` melts and opens on the
+*next*, so `tolerate: n` needs `n + 1` melts. `trip_breaker/1` reads `:tolerate`
+off the service and does that arithmetic, so the number is not restated in your
+test and cannot drift from the configuration.
 
 `ExternalService.reset/1` closes it again, which is what makes the `setup` helper
 above work:
@@ -263,9 +274,8 @@ assert ExternalService.available?(service)
 
 ### Exhausting the rate limit
 
-`ExternalService.RateLimiter.request/1` spends one call's worth of budget without
-running anything, so you can put a service right at its limit before the code
-under test runs:
+`ExternalService.Test.exhaust_rate_limit/1` puts a service right at its limit
+before the code under test runs, reading `:limit` off the service the same way:
 
 ```elixir
 ExternalService.start(service,
@@ -273,12 +283,15 @@ ExternalService.start(service,
   rate_limit: [limit: 2, per: :timer.minutes(1), wait: false]
 )
 
-assert ExternalService.RateLimiter.request(service) == :ok
-assert ExternalService.RateLimiter.request(service) == :ok
+exhaust_rate_limit(service)
 
 assert {:error, %ExternalService.RateLimited{}} =
          ExternalService.call(service, fn -> flunk("should not run") end)
 ```
+
+It is `ExternalService.RateLimiter.request/1` underneath, which spends one call's
+worth of budget without running anything. Reach for that directly when you want a
+service *partly* spent rather than fully.
 
 ### Degrading a service without touching your code
 
@@ -301,33 +314,38 @@ than on any individual call.
 
 ## Asserting that a retry happened
 
-"Did this actually retry?" is a common thing to want to check, and the telemetry
-events answer it. Attach a handler that sends to the test process:
+"Did this actually retry?" is a common thing to want to check, and it is the one
+question the return value cannot answer: a call that failed twice and then
+succeeded returns exactly what a call that succeeded first time returns. The
+telemetry events are the only difference, and
+`ExternalService.Test.record_events/0` puts them where a test can see them:
 
 ```elixir
-test_process = self()
+setup :record_events
 
-:telemetry.attach(
-  "retry-handler",
-  [:external_service, :call, :retry],
-  fn _event, measurements, metadata, _config ->
-    send(test_process, {:retried, measurements, metadata})
-  end,
-  nil
-)
+test "retries a 503" do
+  ExternalService.call(service, fn -> {:retry, :service_unavailable} end)
 
-on_exit(fn -> :telemetry.detach("retry-handler") end)
-
-ExternalService.call(service, fn -> {:retry, :service_unavailable} end)
-
-assert_received {:retried, _measurements, %{service: ^service, reason: :service_unavailable}}
+  assert_retried(service, reason: :service_unavailable)
+end
 ```
 
-Use a handler ID unique to the test — handler IDs are global, so a shared one
-breaks under `async: true`. The other events are listed in the
-[Telemetry](telemetry.md) guide; `[:external_service, :circuit_breaker, :blown]`
-and `[:external_service, :rate_limit, :sleep]` are the other two worth asserting
-on.
+`record_events/0` attaches handlers for this library's events, generating a
+handler ID unique to the calling process and detaching it on exit. That last part
+matters: handler IDs are global, so a shared one breaks under `async: true`.
+
+The assertions return the metadata they matched, so you can go further:
+
+```elixir
+metadata = assert_retried(service)
+assert metadata.reason == :service_unavailable
+```
+
+`refute_retried/2`, `assert_breaker_blown/2` and `assert_throttled/2` cover the
+other three events. `refute_retried/2` earns its place rather than being
+reflexive symmetry — a retry that did *not* happen leaves nothing in the return
+value to assert on instead. All the events are listed in the
+[Telemetry](telemetry.md) guide.
 
 ## Making a service inert
 
