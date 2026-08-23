@@ -1300,14 +1300,26 @@ defmodule ExternalService do
         raise ArgumentError, Enum.map_join(findings, "\n\n", & &1.message)
 
       {:warn, findings} ->
-        # `IO.warn/2` with the caller's env gives the warning a file and a line, so
-        # it reads like any other compiler warning and fails a build compiled with
-        # `--warnings-as-errors`. It anchors at the `defmodule` rather than at the
-        # offending option, which is as close as a module attribute can get.
-        Enum.each(findings, &IO.warn(&1.message, env))
+        # `IO.warn/2` with an env gives the warning a file and a line, so it reads
+        # like any other compiler warning and fails a build compiled with
+        # `--warnings-as-errors`. It anchors at the `use ExternalService` call,
+        # captured in `__using__/1`, rather than at this hook's `defmodule` — the
+        # options are written at the `use`, and a file holding several services
+        # would otherwise point every warning at the same line.
+        Enum.each(findings, &IO.warn(&1.message, warning_env(env)))
     end
 
     nil
+  end
+
+  # The `use` position when `__using__/1` recorded one; this hook's own env
+  # otherwise, so a module that sets `@before_compile ExternalService` by hand
+  # still gets a warning anchored somewhere real.
+  defp warning_env(env) do
+    case Module.get_attribute(env.module, :__external_service_use_position__) do
+      {file, line} when is_binary(file) and is_integer(line) -> %{env | file: file, line: line}
+      _ -> env
+    end
   end
 
   @doc """
@@ -1363,9 +1375,15 @@ defmodule ExternalService do
     * `child_spec/1`, `start_link/1`
   """
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
+    # `__CALLER__` is the `use ExternalService` call itself, which is where the
+    # options being checked are written. The `@before_compile` env is the
+    # `defmodule`, so the position has to be captured here and carried across.
+    use_position = {__CALLER__.file, __CALLER__.line}
+
+    quote bind_quoted: [opts: opts, use_position: use_position] do
       @__external_service__ Keyword.get(opts, :name, __MODULE__)
       @__external_service_opts__ Keyword.delete(opts, :name)
+      @__external_service_use_position__ use_position
 
       # Checked from a `@before_compile` hook rather than here, because `__using__`
       # receives the options as AST: `within: :timer.seconds(1)` has not been
