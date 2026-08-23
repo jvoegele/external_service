@@ -288,7 +288,58 @@ defmodule ExternalService.ConfigCheckTest do
       # this runs from a @before_compile hook rather than from __using__.
       assert warning =~ "`within: 1000`"
       assert warning =~ "spread over about 4.5s"
-      assert warning =~ "lib/compile_check_example.ex"
+      # Line 2 is the `use ExternalService`, not line 1's `defmodule`.
+      assert warning =~ "lib/compile_check_example.ex:2"
+    end
+
+    test "anchors at the `use` call even when it is far from the `defmodule`" do
+      warning =
+        capture_io(:stderr, fn ->
+          compile("""
+          defmodule CompileCheckDistant do
+            @moduledoc \"\"\"
+            A module whose options are nowhere near its head, which is the case
+            the `defmodule` anchor navigated you to the wrong part of.
+            \"\"\"
+
+            @doc "Something in between."
+            def unrelated, do: :ok
+
+            use ExternalService,
+              name: :compile_check_distant,
+              circuit_breaker: [tolerate: 3, within: :timer.seconds(1)],
+              retry: [base: 100, max_attempts: 5]
+          end
+          """)
+        end)
+
+      assert warning =~ "narrower than the failures it has to count"
+      assert warning =~ "lib/compile_check_example.ex:10"
+      refute warning =~ "lib/compile_check_example.ex:1:"
+    end
+
+    test "each service in a file is anchored at its own `use`" do
+      warning =
+        capture_io(:stderr, fn ->
+          compile("""
+          defmodule CompileCheckReads do
+            use ExternalService,
+              name: :compile_check_reads,
+              circuit_breaker: [tolerate: 3, within: :timer.seconds(1)],
+              retry: [base: 100, max_attempts: 5]
+          end
+
+          defmodule CompileCheckWrites do
+            use ExternalService,
+              name: :compile_check_writes,
+              circuit_breaker: [tolerate: 3, within: :timer.seconds(1)],
+              retry: [base: 100, max_attempts: 5]
+          end
+          """)
+        end)
+
+      assert warning =~ "lib/compile_check_example.ex:2"
+      assert warning =~ "lib/compile_check_example.ex:9"
     end
 
     test "a sound configuration compiles silently" do

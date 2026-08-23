@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Changed
+- **Compile-time configuration warnings now anchor at the `use ExternalService`
+  call** ([issue #119](https://github.com/jvoegele/external_service/issues/119)).
+  They fired from the `@before_compile` hook, whose env is the `defmodule`, so
+  jumping to a warning landed on the module head rather than on the option block
+  it is about — some distance away when the options sit below the module's
+  documentation, and ambiguous when one file holds several services:
+
+  ```
+    warning: :tidal_writes has a circuit breaker window narrower than the
+             failures it has to count...
+    │
+ 13 │     use ExternalService,
+    │     ~~~~~~~~~~~~~~~~~~~~
+  ```
+
+  `__using__/1` records `__CALLER__`'s file and line, which is the `use` call, and
+  the hook warns from there. This is what the [Tuning](guides/tuning.md) guide has
+  been describing all along — "at compile time, on the line where the configuration
+  is written."
+
+  Anchoring at the offending *option* is not possible consistently: keyword keys
+  carry no line metadata and neither do literal values, so `within: :timer.seconds(30)`
+  is locatable while `within: 30_000` is not. One anchor that is always the same
+  beats a warning that moves depending on how the reader wrote a number.
+
 ## [3.0.0] - 2026-08-23
 
 The 3.0 release. It changes four defaults and behaviors and **renames nothing**:
