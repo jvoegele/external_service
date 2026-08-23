@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   `.formatter.exs` is also now included in the Hex package; without it in the
   tarball the export reaches nobody installing from Hex.
 
+### Changed
+- **[Circuit Breakers](guides/circuit-breakers.md) documents HTTP clients that
+  retry on their own**
+  ([issue #120](https://github.com/jvoegele/external_service/issues/120)).
+  `Req` retries GET and HEAD requests three times by default, underneath
+  `call/3`, where none of the four mechanisms can see it — measured at 12 requests
+  for a service configured with `max_attempts: 3`. The new section covers what
+  each common client does by default, and why the hidden attempts matter more than
+  the request count: they are invisible to the retry telemetry, to the breaker's
+  melt count, and to the `explain/1` / `simulate/3` / `ConfigCheck` arithmetic
+  that the 3.0 tuning work rests on.
+
 ## [3.0.0-rc.4] - 2026-08-20
 
 One fix, and the testing that found it.
