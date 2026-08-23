@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- **`.formatter.exs` exports `locals_without_parens`**
+  ([issue #118](https://github.com/jvoegele/external_service/issues/118)).
+  The README and every guide write the front door paren-free — `call fn -> ... end`
+  — but the export block was missing, so `mix format` in a downstream project
+  rewrote the documented idiom to `call(fn -> ... end)`. Add `:external_service`
+  to `import_deps` and the rules now come with it:
+
+  ```elixir
+  # .formatter.exs
+  [import_deps: [:external_service]]
+  ```
+
+  The exported rules cover `call/1,2`, `call!/1,2` and `call_async/1,2`.
+  `call_async_stream` is deliberately excluded — its first argument is an
+  enumerable, so the parenthesized form reads better — as is the `external_call`
+  decorator, which the docs always write as `@decorate external_call(MyApp.Service)`.
+
+  `.formatter.exs` is also now included in the Hex package; without it in the
+  tarball the export reaches nobody installing from Hex.
+
 ## [3.0.0-rc.4] - 2026-08-20
 
 One fix, and the testing that found it.

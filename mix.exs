@@ -71,7 +71,19 @@ defmodule ExternalService.Mixfile do
       # `guides` is included because the README links into it: hex.pm renders the
       # README out of this tarball, so without the guides those links 404 on the
       # package page. (HexDocs is unaffected — ExDoc rewrites them at build time.)
-      files: ["lib", "guides", "mix.exs", "README.md", "LICENSE", "CHANGELOG.md"],
+      files: [
+        "lib",
+        "guides",
+        "mix.exs",
+        # Shipped so `import_deps: [:external_service]` finds the
+        # `locals_without_parens` rules for the paren-free `call fn -> ... end`
+        # idiom the guides use; without it in the tarball the export block is
+        # invisible to everyone installing from Hex.
+        ".formatter.exs",
+        "README.md",
+        "LICENSE",
+        "CHANGELOG.md"
+      ],
       maintainers: ["Jason Voegele"],
       licenses: ["Apache-2.0"],
       links: %{"GitHub" => @source_url}
