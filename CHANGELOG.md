@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-23
+
+The 3.0 release. It changes four defaults and behaviors and **renames nothing**:
+your code compiles unchanged and behaves differently, which is what makes it a
+major. **Start with the [migration guide](guides/migrating-to-3.0.md)** — its
+first section tells you in about a minute which changes affect you, by grepping
+two strings out of your boot logs.
+
+Alongside the breaking changes, 3.0 is largely about being able to *answer
+questions about a configuration before shipping it*: `ExternalService.explain/1`,
+`ExternalService.simulate/3`, `ExternalService.Insights`, `within: :auto`, and
+warnings at compile time when the numbers do not add up. See
+[Tuning](guides/tuning.md).
+
+The full detail of everything in this release is in the `3.0.0-rc.1` through
+`3.0.0-rc.4` sections below, which are unchanged. What follows is what landed
+after `3.0.0-rc.4`.
+
 ### Added
 - **`.formatter.exs` exports `locals_without_parens`**
   ([issue #118](https://github.com/jvoegele/external_service/issues/118)).
@@ -753,7 +771,7 @@ a minute which of these affect you, by grepping two strings out of your boot log
   with `available?/1` and `rate_limited?/1`. `reset_all/1` frees every slot.
 - **`[:external_service, :concurrency, :rejected]` and
   `[:external_service, :concurrency, :waited]` telemetry**, and a new
-  [Concurrency Limiting](concurrency.md) guide. The guide documents what a
+  [Concurrency Limiting](guides/concurrency.md) guide. The guide documents what a
   rejection actually means — the call is handed back to its caller, not dropped —
   that there is no cooldown, and the measured shed rate against offered load
   (0% below capacity, 12% at capacity, 54% at twice capacity).
@@ -799,7 +817,7 @@ a minute which of these affect you, by grepping two strings out of your boot log
   Together these are the answer to #55's "first-class test mode" question. Both
   are exact where `tolerate: 1_000_000` was only large, and both are meaningful
   outside tests, so neither is API whose only purpose is switching the library
-  off. The [Testing](testing.md) guide now shows the combination, and says
+  off. The [Testing](guides/testing.md) guide now shows the combination, and says
   plainly that a service made inert is not a service being tested.
 - **`ExternalService.RateLimiter.reset/1` discards a service's recorded rate
   limit usage**, and the `ExternalService.RateLimiter` behaviour gained a
@@ -837,7 +855,7 @@ a minute which of these affect you, by grepping two strings out of your boot log
   only for services that configure `:rate_limit`. `wait: :infinity` states the
   unbounded intent explicitly and silences it.
 
-- **A [Testing](testing.md) guide**
+- **A [Testing](guides/testing.md) guide**
   ([issue #45](https://github.com/jvoegele/external_service/issues/45)). Covers
   the thing an adopter hits first and the guides never addressed: service state
   is global — it lives in `:persistent_term` and `:fuse` keyed on the service
@@ -1205,7 +1223,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.4...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/3.0.0...HEAD
+[3.0.0]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.4...3.0.0
 [3.0.0-rc.4]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.3...3.0.0-rc.4
 [3.0.0-rc.3]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.2...3.0.0-rc.3
 [3.0.0-rc.2]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.1...3.0.0-rc.2
