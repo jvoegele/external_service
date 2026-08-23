@@ -157,18 +157,25 @@ defmodule ExternalService.RateLimiterTest do
     test "the budget covers the whole call, not each individual sleep", %{sleep_spy: spy} do
       rate_limiter =
         :cumulative
-        |> RateLimiter.new(limit: 1, per: 1_000, wait: 25, backend: {StubLimiter, [wait: 10]})
+        |> RateLimiter.new(limit: 1, per: 1_000, wait: 125, backend: {StubLimiter, [wait: 50]})
         |> Map.put(:sleep, spy)
 
       # Each sleep is well inside the budget, but the third would push the total
       # past it, so the call gives up rather than waiting indefinitely in
       # budget-sized increments.
+      #
+      # The budget is a real monotonic deadline and `spy` really sleeps, so these
+      # numbers need room for a sleep to overrun: the second sleep is admitted
+      # while elapsed < 75ms and the third refused once elapsed > 75ms, which
+      # leaves ~25ms either side of the 50ms-per-sleep nominal. It used to be
+      # `wait: 25` against 10ms sleeps — 5ms of room, which a loaded scheduler
+      # ate, admitting one sleep instead of two.
       StubLimiter.deny_next(5)
 
-      assert {RateLimiter, :rate_limited, 10} =
+      assert {RateLimiter, :rate_limited, 50} =
                RateLimiter.call(rate_limiter, fn -> flunk("should not have run") end)
 
-      assert get_sleep_calls() == [10, 10]
+      assert get_sleep_calls() == [50, 50]
     end
 
     defp init_sleep_spy(_context) do
