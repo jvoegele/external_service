@@ -1,7 +1,7 @@
 defmodule ExternalService.Mixfile do
   use Mix.Project
 
-  @version "3.1.0"
+  @version "3.2.0"
   @source_url "https://github.com/jvoegele/external_service"
 
   def project do
@@ -78,6 +78,10 @@ defmodule ExternalService.Mixfile do
       files: [
         "lib",
         "guides",
+        # Agent-facing guidance, consumed by `usage_rules`
+        # (https://hex.pm/packages/usage_rules). Must be listed here or it is absent from
+        # the tarball and `mix usage_rules.sync` finds nothing.
+        "usage-rules.md",
         "mix.exs",
         # Shipped so `import_deps: [:external_service]` finds the
         # `locals_without_parens` rules for the paren-free `call fn -> ... end`

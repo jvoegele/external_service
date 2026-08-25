@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-08-25
+
+Agent usage rules, shipped in the package. Nothing about a guarded call changes.
+
+### Added
+
+- **`usage-rules.md`** — this library's guidance condensed for AI coding agents, in the layout
+  [`usage_rules`](https://hex.pm/packages/usage_rules) syncs from. A consumer can pull it into
+  their `AGENTS.md` with `mix usage_rules.sync`, or read it directly at
+  `deps/external_service/usage-rules.md`.
+
+  The guides are written for a person reading them in order; an agent reads nothing unless it is
+  in context, and needs the places where the obvious guess is wrong rather than the tour. So the
+  file leads with the `call` return contract — **`{:error, reason}` counts as success and is
+  never retried unless you say so** — and then the traps, most of them the ones the 3.0 tuning
+  milestone was built around:
+
+  * a client's own retries multiply against `:max_attempts` (Req's `:safe_transient` covers GET
+    and HEAD only, so a POST behaves differently under identical configuration);
+  * `max_attempts: 5` at the default `base: 10` is 150 ms of total waiting — raise `:base`, not
+    the attempt count;
+  * `:tolerate` counts failed **attempts**, and the window has to be wide enough to contain the
+    melts or the breaker never opens, silently — reach for `explain/1`, `simulate/3` and
+    `ConfigCheck` rather than hand-tuning;
+  * `:wait` depends on **where the call is made**, not on the service;
+  * `RateLimited` and `ServiceSaturated` neither melt the breaker nor get retried — shedding is
+    not failing.
+
 ## [3.1.0] - 2026-08-23
 
 Two testing modules and one diagnostic fix. Nothing here changes how a guarded
@@ -1335,6 +1363,7 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add this changelog...better late than never!
 
 [Unreleased]: https://github.com/jvoegele/external_service/compare/3.1.0...HEAD
+[3.2.0]: https://github.com/jvoegele/external_service/compare/3.1.0...3.2.0
 [3.1.0]: https://github.com/jvoegele/external_service/compare/3.0.0...3.1.0
 [3.0.0]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.4...3.0.0
 [3.0.0-rc.4]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.3...3.0.0-rc.4
