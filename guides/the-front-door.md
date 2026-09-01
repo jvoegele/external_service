@@ -1,13 +1,15 @@
 # The Module Front Door
 
 `use ExternalService` is the recommended, declarative way to define a gateway to
-an external service. You configure the circuit breaker, rate limiting, and
-default retry options once at the module level, start the module under a
-supervisor, and call the service through a small set of generated functions.
+an external service. You configure the circuit breaker, rate limiting,
+concurrency limit, and default retry options once at the module level, start
+the module under a supervisor, and call the service through a small set of
+generated functions.
 
 This guide covers what `use ExternalService` generates and how to operate it.
 For the mechanics of each subsystem, see the [Circuit breakers](circuit-breakers.md),
-[Retries](retries.md), and [Rate limiting](rate-limiting.md) guides.
+[Retries](retries.md), [Rate limiting](rate-limiting.md), and
+[Concurrency](concurrency.md) guides.
 
 ## Defining a service
 
@@ -31,7 +33,8 @@ end
 ```
 
 The options are exactly those accepted by `ExternalService.start/2`
-(`:circuit_breaker`, `:rate_limit`, `:retry`, `:sleep_function`), plus:
+(`:circuit_breaker`, `:rate_limit`, `:concurrency`, `:retry`,
+`:sleep_function`), plus:
 
 - `:name` — the term that identifies the service. Defaults to the module name.
 
@@ -41,7 +44,8 @@ and keeps things unambiguous.
 ## Starting the service
 
 A service must be started before it is called. Starting installs the circuit
-breaker and rate limiter and records the default retry options. Because `use
+breaker, rate limiter, and concurrency limit (if configured), and records the
+default retry options. Because `use
 ExternalService` generates `child_spec/1`, you can place the module directly in
 a supervision tree:
 
@@ -87,8 +91,9 @@ above keeps the `:within` and `:reset` from the module and only changes
 | `call_async_stream/2,3,4`      | `ExternalService.call_async_stream/3,4,5` | Parallel, streaming calls.          |
 | `available?/0`                 | `ExternalService.available?/1`            | Is the breaker closed?              |
 | `blown?/0`                     | `ExternalService.blown?/1`                | Is the breaker open?                |
+| `saturated?/0`                 | `ExternalService.saturated?/1`            | Is no concurrency slot free?        |
 | `reset/0`                      | `ExternalService.reset/1`                 | Force the breaker closed.           |
-| `reset_all/0`                  | `ExternalService.reset_all/1`             | Clear the breaker and the limiter.  |
+| `reset_all/0`                  | `ExternalService.reset_all/1`             | Clear the breaker, the rate limiter, and the concurrency limit. |
 | `child_spec/1`, `start_link/1` | —                                         | Supervision integration.            |
 
 The one- and two-argument `call` forms differ only in whether you pass retry
@@ -129,7 +134,8 @@ attempted) and `false` when it is open or the service has not been started.
 
 Everything the front door generates is a thin wrapper over the functional
 `ExternalService` API (`start/2`, `call/3`, `call!/3`, `call_async/3`,
-`call_async_stream/5`, `available?/1`, `blown?/1`, `reset/1`). Reach for the
+`call_async_stream/5`, `available?/1`, `blown?/1`, `saturated?/1`, `reset/1`,
+`reset_all/1`). Reach for the
 functional API directly when a service identifier isn't naturally a module — for
 example, when you start services dynamically or key them on runtime values:
 

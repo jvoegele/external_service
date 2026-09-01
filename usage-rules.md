@@ -99,23 +99,31 @@ dependency. For a service that is briefly overloaded, raise `:base`, not the att
 retry: [max_attempts: 5, base: 100, cap: 2_000, backoff: :exponential, jitter: true]
 ```
 
-`max_attempts: :infinity` retries forever, and **the circuit breaker does not reliably stop it**.
+`max_attempts: :infinity` retries forever. Pair it with an `:expiry` — under the default breaker
+`:melt` setting a call that never gives up never melts, so `start/2` **rejects** the combination
+without one. Even with an `:expiry`, **the circuit breaker does not reliably stop the retrying**
+before that budget runs out.
 
-### Circuit-breaker `:tolerate` counts failed *attempts*, not failed calls
+### Circuit-breaker `:tolerate` counts failed *calls*, not failed attempts
 
-Retries melt the breaker too, so a call with `max_attempts: 5` can contribute five melts on its
-own. `tolerate ≈ failing calls × max_attempts` is the arithmetic to have in mind.
+A call melts the breaker once, when its retrying gives up — however many attempts it made along
+the way. `tolerate: N` means N failing calls, whatever `:max_attempts` is; raising
+`:max_attempts` does not spend the breaker's budget faster. (A service can opt back into the old
+per-attempt melting with `circuit_breaker: [melt: :per_attempt]`, but that is not the default.)
 
-And the window has to be wide enough to *contain* those melts. If one call's retry schedule
-spans 7.5 s and you need 6 calls to open the breaker, the melts spread over ~37.5 s — so a
-`within: 30_000` breaker **never opens**, silently, with nothing raising and no log line.
+The window still has to be wide enough to *contain* those calls. A failing call can take up to
+its own retry window to give up — 1.5 s here — so `:tolerate + 1` of those have to fit inside
+`:within`. If 6 calls are needed to open the breaker and each can take 1.5 s, the melts can spread
+over up to ~9 s — so a `within: 5_000` breaker might **never open**, silently, with nothing
+raising and no log line. Leaving `:within` unset lets it default to `:auto`, which sizes it from
+the retry options for you.
 
 Do not hand-tune this. Ask the library:
 
 ```elixir
 IO.puts ExternalService.explain(MyApp.Stripe)          # what will this configuration do?
 ExternalService.simulate(MyApp.Stripe, :always_failing) # does the breaker actually open?
-#=> %Simulation{opens_after: 4, worst_call: 1500, attempts: 20, ...}
+#=> %Simulation{opens_after: 6, worst_call: 1500, attempts: 30, ...}
 ExternalService.RetryOptions.window(base: 100, max_attempts: 5)  #=> 1500
 ```
 
@@ -145,7 +153,7 @@ misconfiguration.
 
 | Error | Melts breaker? | Retried? |
 | --- | --- | --- |
-| `%ExternalService.RetriesExhausted{}` | the attempts did | — |
+| `%ExternalService.RetriesExhausted{}` | **yes**, once, when the retrying gave up | — |
 | `%ExternalService.CircuitBreakerOpen{}` | n/a — it is already open | no |
 | `%ExternalService.RateLimited{}` (http_status 429) | **no** | **no** |
 | `%ExternalService.ServiceSaturated{}` (http_status 503) | **no** | **no** |

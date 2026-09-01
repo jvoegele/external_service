@@ -11,9 +11,10 @@ defmodule ExternalService.RateLimiter do
 
   A backend answers one question, in two forms: may a call proceed right now,
   and if not, how long until it may? `c:check/2` answers it and consumes the
-  call; `c:peek/2` answers it and consumes nothing. Everything else — sleeping,
-  honoring the `:wait` budget, telemetry, logging — is handled for you, so that
-  every backend behaves consistently.
+  call; `c:peek/2` answers it and consumes nothing. `c:reset/2` clears whatever
+  state the backend keeps for a service. Everything else — sleeping, honoring
+  the `:wait` budget, telemetry, logging — is handled for you, so that every
+  backend behaves consistently.
 
       defmodule MyApp.RateLimiter do
         @behaviour ExternalService.RateLimiter
@@ -29,6 +30,20 @@ defmodule ExternalService.RateLimiter do
             {:ok, _count} -> :ok
             {:throttled, milliseconds} -> {:wait, milliseconds}
           end
+        end
+
+        @impl true
+        def peek(_service, config) do
+          case MyStore.peek(config.key, config.window, config.limit) do
+            {:ok, _count} -> :ok
+            {:throttled, milliseconds} -> {:wait, milliseconds}
+          end
+        end
+
+        @impl true
+        def reset(_service, config) do
+          MyStore.reset(config.key)
+          :ok
         end
       end
 

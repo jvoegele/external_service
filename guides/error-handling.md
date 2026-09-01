@@ -28,7 +28,9 @@ Each carries a `:context` map that always includes the `:service` it relates to.
 `RetriesExhausted` additionally carries `:context.reason` — the value from the
 function's last `{:retry, reason}` return, or `:reason_unknown` if it returned a
 bare `:retry`. `RateLimited` carries `:context.retry_after`, the milliseconds
-until the call would have been admitted.
+until the call would have been admitted. `ServiceSaturated` carries
+`:context.limit` and `:context.in_flight`, the configured concurrency limit and
+how many calls were in flight when this one was shed.
 
 ```elixir
 {:error, %ExternalService.RetriesExhausted{context: %{service: svc, reason: reason}}} ->
@@ -163,15 +165,22 @@ end
 
 `call!/3` only _raises_ the `ExternalService` errors; values your function
 returns are still returned normally. And because every error knows its own
-`http_status/1`, you can collapse the handling further:
+`http_status/1`, you can collapse the handling further with `Errata.http_status/1`,
+which dispatches to whichever struct `e` actually is:
 
 ```elixir
 rescue
   e in [ExternalService.RetriesExhausted, ExternalService.CircuitBreakerOpen,
         ExternalService.ServiceNotStarted] ->
-    send_resp(conn, ExternalService.RetriesExhausted.http_status(e), "")
+    send_resp(conn, Errata.http_status(e), "")
 end
 ```
+
+Calling `ExternalService.RetriesExhausted.http_status(e)` directly instead would
+be wrong here: a module's generated `http_status/1` ignores its argument and
+always returns *that module's own* configured status, so it would report `503`
+even when `e` is a `%ExternalService.ServiceNotStarted{}` (whose real status is
+`500`).
 
 ## Which should I use?
 

@@ -39,14 +39,14 @@ use ExternalService,
 
 | Option             | Default  | Meaning                                                                                        |
 | ------------------ | -------- | ---------------------------------------------------------------------------------------------- |
-| `:tolerate`        | `10`     | Number of failed **attempts** tolerated within the `:within` window before the breaker opens. `:infinity` never opens. |
-| `:within`          | `10_000` | Length of the failure-counting window, in milliseconds.                                        |
+| `:tolerate`        | `10`     | Number of failed **calls** tolerated within the `:within` window before the breaker opens (see below — `:melt` changes what counts as one). `:infinity` never opens. |
+| `:within`          | `:auto`  | Length of the failure-counting window, in milliseconds. Sized automatically from the retry options; never below `10_000`. |
 | `:reset`           | `60_000` | Milliseconds to wait before the breaker resets (closes) after opening.                         |
 | `:fault_injection` | —        | If set to a rate between `0.0` and `1.0`, randomly fails that fraction of calls (for testing). |
 
-So `tolerate: 5, within: 1_000` means "open the breaker once there are more than
-5 failed attempts inside any 1-second window." After opening, the breaker stays open
-for `:reset` milliseconds, then closes again and calls resume under the same
+So `tolerate: 5, within: 1_000` means "open the breaker once there have been more
+than 5 failing calls inside any 1-second window." After opening, the breaker stays
+open for `:reset` milliseconds, then closes again and calls resume under the same
 monitoring.
 
 The `:circuit_breaker` option (and every key within it) is optional. Omit it to

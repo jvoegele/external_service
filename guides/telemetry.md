@@ -36,9 +36,13 @@ your function, or `call!/3` raising on an open breaker or exhausted retries.
 
 ### `[:external_service, :call, :retry]`
 
-Emitted each time a call's function fails in a way that melts the circuit breaker
-(it returned `:retry` / `{:retry, reason}`, or it raised). Whether another
-attempt is actually made depends on the retry options.
+Emitted for each failed *attempt*: the function returned `:retry` /
+`{:retry, reason}`, returned a value matched by the `:retry_on` predicate, or
+raised an exception matched by `:retry_exceptions`. This is a per-attempt count,
+**not** a melt count — under the default circuit-breaker `:melt` setting
+(`:per_call`), a call that retries four times and then succeeds emits this event
+four times and melts the breaker not at all. See
+[`:tolerate` counts calls, not attempts](circuit-breakers.md#what-counts-as-a-failure).
 
 - **Measurements:** `:count` (always `1`)
 - **Metadata:** `:service`, `:reason`
@@ -119,8 +123,21 @@ defmodule MyApp.ServiceTelemetry do
   def handle_event([:external_service, :rate_limit, :sleep], %{sleep_time: ms}, %{service: svc}, _config) do
     Logger.info("Rate limited #{inspect(svc)}; slept #{ms}ms")
   end
+
+  def handle_event([:external_service, :concurrency, :rejected], _measurements, %{service: svc}, _config) do
+    Logger.warning("Shed a call to #{inspect(svc)}; concurrency limit full")
+  end
+
+  def handle_event([:external_service, :concurrency, :waited], %{wait_time: ms}, %{service: svc}, _config) do
+    Logger.info("#{inspect(svc)} waited #{ms}ms for a concurrency slot")
+  end
 end
 ```
+
+Every handler passed to `attach_many/4` must have a clause for each event it is
+attached to — a `FunctionClauseError` on one event detaches the handler from
+*all* of them, silently. That is why every event listed above has a matching
+clause.
 
 Attach handlers once at application start (for example in your
 `Application.start/2`).

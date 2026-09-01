@@ -24,7 +24,7 @@ Then run `mix deps.get`.
 
 Calling an external service is risky: the network hiccups, the service is
 briefly overloaded, or it goes down entirely. `ExternalService` wraps those
-calls with two complementary safety mechanisms:
+calls with three complementary safety mechanisms:
 
 - **Retries** smooth over _transient_ failures by trying a failed request
   again, with configurable backoff.
@@ -33,6 +33,10 @@ calls with two complementary safety mechanisms:
   calls fail fast instead of piling up against a service that is already down.
 - Optionally, a **rate limiter** keeps you under the call quota the external
   service imposes.
+
+There is also a fourth, optional mechanism, a **concurrency limit** that bounds
+how many calls can be in flight at once — see [Concurrency](concurrency.md).
+This guide sticks to the first three.
 
 You wrap your call to the external service in a function, hand that function to
 `ExternalService`, and it applies all of the above on every call.
@@ -167,7 +171,10 @@ ExternalService` generates, plus supervision and per-environment overrides.
 - **[Retries](retries.md)** — backoff strategies, jitter, attempt and time
   budgets, and retrying on exceptions.
 - **[Rate limiting](rate-limiting.md)** — staying under a service's quota.
+- **[Concurrency](concurrency.md)** — bounding how many calls are in flight at
+  once with the bulkhead pattern.
 - **[Error handling](error-handling.md)** — `call` vs `call!` and the
   structured error types.
 - **[Telemetry](telemetry.md)** — observing calls, retries, and breaker trips.
+- **[Migrating to 3.0](migrating-to-3.0.md)** — upgrading from 2.x.
 - **[Migrating to 2.0](migrating-to-2.0.md)** — upgrading from 1.x.

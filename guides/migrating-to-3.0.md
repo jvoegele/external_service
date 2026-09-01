@@ -1,11 +1,12 @@
 # Migrating to 3.0
 
-ExternalService 3.0 changes four things, and **nothing renames**. Your code
+ExternalService 3.0 changes four defaults and behaviors, and makes one
+dependency optional — five things in total — and **nothing renames**. Your code
 compiles unchanged; it behaves differently. That is exactly what makes this a
 major version: there is no call site to fix, because the call sites were never
 wrong — the *defaults* were.
 
-Three of the four changes are defaults that used to mean "never give up".
+Three of those four defaults/behaviors used to mean "never give up".
 Retrying without a bound, waiting for a rate limit without a bound, and a retry
 time budget that quietly rounded itself up. Each now stops at a finite point, and
 each has a one-line way to keep the old behavior if it was what you wanted.
@@ -89,10 +90,12 @@ backoff the delays are `[10, 20, 40, 80]`, so a defaulted call waits at most
 raise `:base` — `base: 100` is the usual choice for HTTP — rather than
 `:max_attempts`.
 
-It also restores the circuit breaker at its own defaults. Every failing attempt
-melts, so five attempts melt five of the ten a default breaker tolerates: two
-fully-failing calls open it. Today, a default breaker paired with default retry
-options never opens at all, because growing backoff delays outpace its `:within`
+It also restores the circuit breaker at its own defaults. Under the default
+`:melt` setting a call melts the breaker once, when its retrying gives up (see
+[#4 below](#4-tolerate-counts-calls-not-attempts)), so it takes eleven
+fully-failing calls to open a default breaker (`tolerate: 10`) — independent of
+`:max_attempts`. Today, a default breaker paired with default retry options
+never opens at all, because growing backoff delays outpace its `:within`
 window.
 
 ## 2. The rate limit wait is bounded by default
@@ -148,9 +151,9 @@ produces exactly the same delays as 2.x:
 
 | `:expiry` | 2.x                              | 3.0                              |
 | --------- | -------------------------------- | -------------------------------- |
-| 50ms      | 2 attempts, 100ms slept          | 4 attempts, 50ms slept           |
-| 250ms     | 6 attempts, 250ms slept          | 6 attempts, 250ms slept — same   |
-| 1000ms    | 8 attempts, 1000ms slept         | 8 attempts, 1000ms slept — same  |
+| 50ms      | 2 attempts, 100ms slept          | 4 attempts, 51ms slept            |
+| 250ms     | 6 attempts, 254ms slept          | 6 attempts, 250ms slept — same   |
+| 1000ms    | 8 attempts, 1001ms slept         | 8 attempts, 1000ms slept — same  |
 
 Note that the change runs in both directions at once: *more* attempts, in *less*
 time. A tight budget now does what it says — it retries as fast as the backoff
