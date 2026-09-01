@@ -178,7 +178,7 @@ defmodule ExternalService do
           "sizes the window against the retry options instead, since how long it takes " <>
           "`:tolerate` failures to arrive depends on how long a failing call takes. It is " <>
           "a floor, never narrower than the 10 seconds it replaces — see " <>
-          "[Sizing the window](tuning.md) for when to set it yourself."
+          "[Sizing the breaker](tuning.md) for when to set it yourself."
     ],
     reset: [
       type: :pos_integer,

@@ -229,9 +229,14 @@ never comes into play at all.
 > immediately, still says wait, and the loop spins until real time has passed. The
 > call takes exactly as long and burns a core doing it.
 >
-> Measured at `limit: 1, per: 2_000`, the throttled call still took **2000ms**
-> and invoked the no-op **2,075,418 times**. The same applies to waiting for a
-> concurrency slot, which is also waiting on something else to happen.
+> Measured at `limit: 1, per: 2_000, wait: :infinity`, the throttled call still
+> took **2000ms** and invoked the no-op **2,075,418 times** (the exact count is
+> machine-dependent — expect a different number on a different machine, but the
+> same order of magnitude). The explicit `:infinity` matters: the *default* wait
+> budget is exactly one window, which sits right at the boundary this loop
+> checks against, so it fails fast with `RateLimited` instead of spinning
+> through it. The same applies to waiting for a concurrency slot, which is also
+> waiting on something else to happen.
 >
 > Retry backoff is the exception, because the delays are a fixed sequence rather
 > than a re-check loop — see [Retries](#retries) above.

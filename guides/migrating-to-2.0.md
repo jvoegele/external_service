@@ -249,6 +249,15 @@ defmodule MyApp.PubSub do
 end
 ```
 
+Carrying the old fuse window straight across like this — `within: 1_000` — actually
+trips `ExternalService`'s compile-time check here: with `backoff: :linear, base:
+100, expiry: 5_000` a single failing call's retry window is about 406ms, but the
+six failing calls it takes to open the breaker (`tolerate: 5`, one melt each) can
+spread over about 2s — wider than the `within: 1_000` window that's supposed to
+count them. The 1.x fuse had no such check, so this only surfaces now. Either
+widen `within` or drop it and let `:auto` size the window from the retry options,
+as the warning itself suggests.
+
 Renames at the call site: `external_call` → `call`, `external_call!` → `call!`,
 `external_call_async` → `call_async`, `external_call_async_stream` →
 `call_async_stream`, `reset_fuse` → `reset`.
