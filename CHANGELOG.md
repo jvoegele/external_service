@@ -7,20 +7,29 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [3.2.2] - 2026-09-01
+
+Dependency maintenance. Nothing about a guarded call changes.
+
 ### Changed
 
-- **The `errata` dependency requirement moves from `~> 1.5` to `~> 1.8`.** Errata 1.8.0 added
-  `Errata.root_error/1` — the deepest *Errata* error in a cause chain, as opposed to
-  `Errata.root_cause/1`'s deepest *cause*, which may be a foreign, non-Errata value. Errata 1.9.0
-  formally deprecates `root_cause/1` in favor of it (a compiler warning naming the replacement;
-  the function keeps working until Errata 2.0). `usage-rules.md`, the [Using
-  Errata](guides/errata.md) and [Error Handling](guides/error-handling.md) guides, and this
-  library's own error moduledocs now lead with `root_error/1` accordingly — `Errata.cause/1` is
-  unaffected either way, and remains the one-level-down accessor.
+- **The `errata` dependency requirement moves from `~> 1.5` to `~> 1.8`** (`mix.lock` resolves
+  1.9.0, the latest release). Errata 1.8.0 added `Errata.root_error/1` — the deepest *Errata*
+  error in a cause chain, as opposed to `Errata.root_cause/1`'s deepest *cause*, which may be a
+  foreign, non-Errata value. Errata 1.9.0 formally deprecates `root_cause/1` in favor of it (a
+  compiler warning naming the replacement; the function keeps working until Errata 2.0).
+  `usage-rules.md`, the [Using Errata](guides/errata.md) and [Error Handling](guides/error-handling.md)
+  guides, and this library's own error moduledocs now lead with `root_error/1` accordingly —
+  `Errata.cause/1` is unaffected either way, and remains the one-level-down accessor.
 
   Nothing else in errata 1.6.0 through 1.9.0 touches this library: the stricter `use` option
   validation added in 1.8.0 doesn't apply, since every `use Errata.InfrastructureError` call here
   only ever passed `default_message:` and `retryable:`.
+
+- **`hammer` (test-only) moves from 7.4.0 to 7.4.1**, already within the declared `~> 7.0`
+  constraint. Fixes the `TokenBucket` ETS backend's refill resolution, but doesn't touch anything
+  this library tests: `test/support/hammer_limiter.ex` uses Hammer's default `:fix_window`
+  algorithm, never `:token_bucket`.
 
 ## [3.2.1] - 2026-09-01
 
@@ -1414,7 +1423,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/3.2.1...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/3.2.2...HEAD
+[3.2.2]: https://github.com/jvoegele/external_service/compare/3.2.1...3.2.2
 [3.2.1]: https://github.com/jvoegele/external_service/compare/3.2.0...3.2.1
 [3.2.0]: https://github.com/jvoegele/external_service/compare/3.1.0...3.2.0
 [3.1.0]: https://github.com/jvoegele/external_service/compare/3.0.0...3.1.0
