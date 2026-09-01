@@ -152,7 +152,9 @@ per attempt needs a wider window than `:auto` can know to ask for.
 > Services that keep the old semantics with `circuit_breaker: [melt: :per_attempt]`
 > still need that rule. The library warns when such a configuration has a
 > `:tolerate` smaller than its `:max_attempts`, which is the case where a call
-> trips its own breaker part-way through its own retry loop.
+> trips its own breaker part-way through its own retry loop. See
+> [Choosing `:per_call` or `:per_attempt`](circuit-breakers.md#choosing-per_call-or-per_attempt)
+> for why you might still reach for it and what it costs beyond migration.
 
 ## Three situations
 

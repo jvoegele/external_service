@@ -66,14 +66,18 @@ retrying gives up, where a failing attempt is one in which:
 > #### Melt and retry go together for exceptions {: .info}
 >
 > The `:retry_exceptions` retry option governs **both** whether a raised exception
-> is retried **and** whether it melts the breaker. An exception `:retry_exceptions`
-> matches is retried and melts the breaker; one it does not match is neither
-> retried nor melted — it propagates to the caller and leaves the breaker
-> untouched.
+> is retried **and** whether it counts toward melting the breaker — the two are
+> the same predicate, not two separately-configurable things. An exception
+> `:retry_exceptions` matches is retried, and counts as a failing attempt if the
+> call goes on to give up; one it does not match is never retried at all — it
+> propagates to the caller on the spot, and leaves the breaker untouched.
 >
-> Explicit `:retry` / `{:retry, reason}` return values, and results matched by the
-> `:retry_on` predicate, always melt the breaker — they are ways of asking for
-> another attempt.
+> The same is true of explicit `:retry` / `{:retry, reason}` return values and
+> results matched by the `:retry_on` predicate: they are ways of asking for
+> another attempt, not ways of melting the breaker directly. None of these melt
+> anything by themselves — a call that retries several times and then succeeds
+> melts nothing at all, however many of its attempts asked for another try. What
+> melts the breaker, once, is the call giving up: see the `:tolerate` note below.
 
 Values your function simply returns — including its own `{:error, reason}` — are
 successes as far as the breaker is concerned and do not melt it.
@@ -115,6 +119,84 @@ successes as far as the breaker is concerned and do not melt it.
 > budget in attempts: `:tolerate` as roughly *failing calls you will accept* ×
 > `:max_attempts`. The library warns when such a configuration would let a call
 > trip its own breaker part-way through its own retry loop.
+
+## Choosing `:per_call` or `:per_attempt`
+
+`:melt` decides what one unit of `:tolerate` counts, and it is worth choosing
+deliberately rather than leaving unexamined — even though the default,
+`:per_call`, is the right choice for nearly every service.
+
+**`:per_call` is what the rest of this guide assumes.** A call melts the
+breaker once, when its retrying gives up, so `:tolerate` and `:max_attempts`
+are two independent decisions, `explain/1` and `simulate/3` can predict the
+breaker's behavior from configuration alone, and a call that fails several
+times and then succeeds costs the breaker nothing. That independence is the
+point of the 3.0 tuning milestone — see
+[`:tolerate` counts calls, not attempts](#what-counts-as-a-failure) above.
+
+**`:per_attempt` melts on every failing attempt**, immediately, rather than
+waiting for a call to give up. Two things follow, and both are real:
+
+- **It reacts faster.** A dependency that is degrading but still, technically,
+  succeeding through retries produces zero melts under `:per_call` — every
+  call that reached it eventually returned a result. Under `:per_attempt` the
+  same degradation shows up in the melt count immediately, because it counts
+  failed attempts rather than failed calls. If you want the breaker itself to
+  notice a dependency going bad while calls are still nominally succeeding,
+  this is the only way to get that; under `:per_call` that signal lives in the
+  `[:external_service, :call, :retry]` telemetry event and `Insights` instead,
+  never in the breaker.
+- **It is the only way to retry genuinely without bound.** `max_attempts:
+  :infinity` with no `:expiry` is rejected outright under `:per_call`, because
+  a call that never gives up would never melt and nothing would ever stop it.
+  Under `:per_attempt` the combination is accepted, and the breaker does
+  eventually halt such a call — though honestly, "eventually, and only by
+  accident": exponential backoff widens the gap between attempts until they no
+  longer accumulate fast enough inside `:within` to open it. Reach for
+  `:expiry` first; this is not a substitute for one, just a shape the library
+  happens to allow.
+
+**What it costs: a call can trip its own breaker.** Under `:per_attempt`,
+`:tolerate` is spent by attempts, not calls, so a single call with a high
+enough `:max_attempts` can melt the breaker more times than `:tolerate` allows
+*by itself* — opening it partway through its own retry loop, with its
+remaining attempts rejected by the breaker it just tripped. Measured with:
+
+```elixir
+circuit_breaker: [tolerate: 3, melt: :per_attempt]
+retry: [max_attempts: 8, base: 1]
+```
+
+this single call gets **4** attempts in — the 4th melts the breaker — and its
+remaining 4 attempts are shed as `CircuitBreakerOpen` instead of running.
+Raising `:max_attempts` here makes the service give up **sooner**, not later,
+which is the least intuitive thing this library used to do before 3.0.
+`ConfigCheck` warns about exactly this, at compile time and at `start/2`,
+whenever `:max_attempts` exceeds `:tolerate`.
+
+The historical version of this trap — before `:within`'s `:auto` sizing
+learned to count how many *calls* it actually takes to reach `:tolerate` + 1
+melts under `:per_attempt`, rather than assuming one call could always produce
+them all — is why a `:per_attempt` breaker at `tolerate: 10, base: 500,
+max_attempts: 5` once stayed closed through 75 seconds of every single call
+failing ([issue #112](https://github.com/jvoegele/external_service/issues/112)):
+`:auto` had installed a 15-second window where the failures needed 22.5.
+Leaving `:within` on `:auto` avoids that today — the fix lives in the same
+function `:auto` and `ConfigCheck`'s narrow-window warning both use.
+Hand-setting `:within` under `:per_attempt` without doing the same arithmetic
+yourself reopens the same trap.
+
+**If you do choose `:per_attempt`**, budget `:tolerate` in attempts rather
+than calls — roughly *(failing calls you're willing to absorb) ×
+`:max_attempts`* — and check the result with `simulate/3` rather than by
+hand; `ConfigCheck` also catches the unbounded-retry and self-tripping
+misconfigurations above automatically.
+
+**In short:** stay on `:per_call` unless you are migrating from a pre-3.0
+service and need its exact old numeric behavior for now, or you specifically
+want the breaker to react to attempt-level noise faster than `:per_call`
+ever will and are willing to hand-tune `:tolerate` against `:max_attempts` to
+get it.
 
 ## When the breaker is open
 

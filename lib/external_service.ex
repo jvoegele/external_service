@@ -104,7 +104,9 @@ defmodule ExternalService do
 
   @typedoc """
   What one unit of the circuit breaker's `:tolerate` counts: a failing call, or a
-  failing attempt. See the `:melt` circuit breaker option under `start/2`.
+  failing attempt. See the `:melt` circuit breaker option under `start/2`, and
+  [Choosing `:per_call` or `:per_attempt`](circuit-breakers.md#choosing-per_call-or-per_attempt)
+  for when `:per_attempt` is worth reaching for and what it costs.
   """
   @type melt :: :per_call | :per_attempt
 
@@ -168,7 +170,9 @@ defmodule ExternalService do
           "failing attempt, which is how versions before 3.0 behaved: a single call with " <>
           "`max_attempts: 5` then contributes up to 5, and `:tolerate` cannot be tuned " <>
           "independently of the retry options. `:per_call` requires retrying to be " <>
-          "bounded — see the note on unbounded retries below."
+          "bounded — see the note on unbounded retries below. See [Choosing `:per_call` " <>
+          "or `:per_attempt`](circuit-breakers.md#choosing-per_call-or-per_attempt) for " <>
+          "when `:per_attempt` is worth it and what it costs."
     ],
     within: [
       type: {:or, [:pos_integer, {:in, [:auto]}]},
