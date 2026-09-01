@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-09-01
+
+A documentation accuracy pass across every guide, the CHANGELOG, and the published moduledocs.
+Nothing about a guarded call changes; one type signature grows to say what it already did.
+
+### Fixed
+
+- **`:tolerate` is now described consistently as counting failed *calls*, not attempts,
+  everywhere it's discussed.** Several guides, the cheatsheet, `usage-rules.md`, and one
+  CHANGELOG entry still described the pre-3.0 semantics — `tolerate ≈ failing calls ×
+  max_attempts` — after 3.0 changed the default to counting failed calls. All now agree with
+  the correct explanation that already existed elsewhere in the same documents.
+- **The concurrency limit (the bulkhead pattern) is documented as a fourth mechanism
+  throughout**, not just in the modules and the cheatsheet — the README, `about.md`,
+  `getting-started.md`, and `the-front-door.md` previously described only three.
+- **Several examples that didn't actually work.** `usage-rules.md`'s own quick-start example
+  tripped `ConfigCheck`'s "narrow window" warning at compile time; `rate-limiting.md`'s
+  `:sleep_function` example and `migrating-to-2.0.md`'s "After (2.0)" example had the same
+  class of problem; `retries.md`'s first code block had a literal syntax error (`4xx` is not
+  valid Elixir).
+- **Numeric claims that had drifted from the code**, caught by running the library against
+  every worked example rather than re-deriving formulas by hand: the `:expiry` timing table,
+  rate-limiter shed-rate percentages, several `simulate/3` and `explain/1` sample outputs, and
+  a handful of retry-window figures.
+- **A nonexistent Errata function.** `usage-rules.md` called a `root_error` function on
+  `Errata` that doesn't exist in the pinned errata version, and claimed `Errata.root_cause/1`
+  is deprecated (it isn't) — corrected to match `errata.md`'s existing, correct usage.
+- Assorted smaller inconsistencies: missing error types in `flow.md`'s and `Decorator`'s error
+  lists, `reset_all/1` undercounting what it clears in several places, stale rate-limiter
+  backend callback counts, a malformed CHANGELOG heading, and a couple of stale cross-reference
+  anchors.
+
+### Changed
+
+- The `t:ExternalService.error/0` typespec now includes `ExternalService.ServiceSaturated.t()`,
+  which `call/3` could already return but the union didn't declare.
+
 ## [3.2.0] - 2026-08-25
 
 Agent usage rules, shipped in the package. Nothing about a guarded call changes.
@@ -1362,7 +1399,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/3.2.0...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/3.2.1...HEAD
+[3.2.1]: https://github.com/jvoegele/external_service/compare/3.2.0...3.2.1
 [3.2.0]: https://github.com/jvoegele/external_service/compare/3.1.0...3.2.0
 [3.1.0]: https://github.com/jvoegele/external_service/compare/3.0.0...3.1.0
 [3.0.0]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.4...3.0.0
