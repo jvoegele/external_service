@@ -1390,7 +1390,7 @@ defmodule ExternalServiceTest do
 
       assert %RetriesExhausted{context: %{reason: ^cause}} = error
       assert Errata.cause(error) == cause
-      assert Errata.root_cause(error) == cause
+      assert Errata.root_error(error) |> Errata.cause() == cause
       assert Errata.format_chain(error) =~ "Caused by: "
       assert Errata.format_chain(error) =~ "upstream said no"
     end

@@ -196,16 +196,19 @@ about is the `:cause`:
 # one level down — the retry reason, if it was an exception
 Errata.cause(error)
 
-# the deepest cause, following the chain — the foreign original underneath
-# everything, such as :econnrefused or a %Mint.TransportError{}, or nil
-Errata.root_cause(error)
+# the deepest Errata error — has a code, a context and a classification to render or report
+Errata.root_error(error)
+
+# the foreign original underneath it — :econnrefused, an %Mint.TransportError{}, ... or nil
+Errata.root_error(error) |> Errata.cause()
 ```
 
 That turns "could not be completed after 3 attempts" into "connection refused", and works across
 library boundaries — `RetriesExhausted` wraps your error and neither knows about the other.
 
-Do not hand-roll a recursive unwrap loop — `root_cause/1` already walks the chain for you. Both
-raise `ArgumentError` if given something that isn't an Errata error. See the
+Do not hand-roll a recursive unwrap loop, and do not reach for `Errata.root_cause/1`: it is
+deprecated since errata 1.9.0 in favor of `root_error/1`, which always returns an Errata error
+rather than possibly a foreign value, so a caller never has to check which it got. See the
 [Using Errata](guides/errata.md) guide — an application's own Errata
 errors can also drive retries via `:retry_on` and `retryable?/1`, which puts the retry decision
 in the error type rather than in a branch on the shape of what came back.

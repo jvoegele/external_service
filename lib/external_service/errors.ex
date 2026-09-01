@@ -14,7 +14,7 @@ defmodule ExternalService.RetriesExhausted do
       return, or `:reason_unknown` when the function returned a bare `:retry`.
 
   When that reason is an exception — including any Errata error — it is also set
-  as this error's `:cause`, so `Errata.root_cause/1` reaches the underlying
+  as this error's `:cause`, so `Errata.root_error/1` reaches the underlying
   failure and `Errata.format_chain/1` prints the chain.
 
   ## Retryability
