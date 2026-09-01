@@ -82,6 +82,7 @@ defmodule ExternalService do
   alias ExternalService.Retry
   alias ExternalService.RetryOptions
   alias ExternalService.ServiceNotStarted
+  alias ExternalService.ServiceSaturated
   alias ExternalService.Simulation
   alias ExternalService.Simulator
 
@@ -119,9 +120,16 @@ defmodule ExternalService do
   @typedoc "Error returned when a call is throttled beyond the rate limit `:wait` budget"
   @type rate_limited :: {:error, RateLimited.t()}
 
+  @typedoc "Error returned when a call is shed because the concurrency limit was full"
+  @type service_saturated :: {:error, ServiceSaturated.t()}
+
   @typedoc "Union type representing all the possible error return values"
   @type error ::
-          retries_exhausted | circuit_breaker_open | service_not_started | rate_limited
+          retries_exhausted
+          | circuit_breaker_open
+          | service_not_started
+          | rate_limited
+          | service_saturated
 
   @type retriable_function_result ::
           :retry | {:retry, reason :: any()} | (function_result :: any())
