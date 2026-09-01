@@ -112,6 +112,8 @@ results = ExternalService.Flow.map(items, MyApp.Stripe, &work/1) |> Enum.to_list
 #   {:error, %ExternalService.RetriesExhausted{...}}
 #   {:error, %ExternalService.CircuitBreakerOpen{...}}
 #   {:error, %ExternalService.ServiceNotStarted{...}}
+#   {:error, %ExternalService.RateLimited{...}}
+#   {:error, %ExternalService.ServiceSaturated{...}}
 ```
 
 `filter`, `partition`, or pattern-match on them downstream — they are ordinary

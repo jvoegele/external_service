@@ -58,7 +58,7 @@ Now the limit is enforced across the cluster, whatever the node count.
 
 Hammer is not a dependency of this library — the backend calls `hit/3` on the
 module you supply, so you add only Hammer itself. Any other shared store works
-too; see `ExternalService.RateLimiter` for the two callbacks a backend
+too; see `ExternalService.RateLimiter` for the four callbacks a backend
 implements.
 
 > #### The quick and dirty alternative {: .tip}

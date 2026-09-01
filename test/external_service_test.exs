@@ -1179,10 +1179,11 @@ defmodule ExternalServiceTest do
     end
 
     test "a call never trips its own breaker mid-flight" do
-      # The zero in the guide's table: with `tolerate: 5, max_attempts: 8` and
-      # per-attempt melting, the *first* call melted the breaker five times inside
-      # its own retry loop and had its remaining attempts rejected by it. Raising
-      # `:max_attempts` made the service give up sooner.
+      # Pre-3.0, with per-attempt melting, this was the trap CHANGELOG.md's
+      # 3.0.0-rc.2 entry describes: with `tolerate: 5, max_attempts: 8`, the
+      # *first* call melted the breaker five times inside its own retry loop
+      # and had its remaining attempts rejected by it. Raising `:max_attempts`
+      # made the service give up sooner.
       service = per_call_fuse(:"no-self-trip", circuit_breaker: [tolerate: 5])
 
       assert {:error, %RetriesExhausted{}} = failing_call(service, 8)

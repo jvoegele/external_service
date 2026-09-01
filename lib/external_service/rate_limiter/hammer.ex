@@ -55,9 +55,11 @@ defmodule ExternalService.RateLimiter.Hammer do
 
   @impl true
   def check(_service, %{module: module, key: key, window: window, limit: limit}) do
-    # Hammer's `hit/3` both checks and consumes, and reports how many
-    # milliseconds remain until the call would be admitted — a real wait time
-    # rather than an estimate.
+    # Hammer's `hit/3` both checks and consumes. For the fixed-window and
+    # sliding-window algorithms it reports how many milliseconds remain until
+    # the call would be admitted — a real wait time rather than an estimate.
+    # The token-bucket and leaky-bucket algorithms instead return a fixed
+    # 1000ms placeholder on denial, regardless of actual bucket state.
     case module.hit(key, window, limit) do
       {:allow, _count} -> :ok
       {:deny, retry_after} -> {:wait, retry_after}

@@ -4,16 +4,16 @@
 [![Documentation](https://img.shields.io/badge/docs-hexdocs-blue.svg)](https://hexdocs.pm/external_service)
 
 An Elixir library for safely calling external services and APIs with
-customizable **retry logic**, the **circuit breaker** pattern, and optional
-**rate limiting**. Calls can be synchronous, asynchronous background tasks, or
-fanned out in parallel for MapReduce-style processing — all under the same
-protection.
+customizable **retry logic**, the **circuit breaker** pattern, optional
+**rate limiting**, and an optional **concurrency limit**. Calls can be
+synchronous, asynchronous background tasks, or fanned out in parallel for
+MapReduce-style processing — all under the same protection.
 
 ## Why?
 
 Calling an external service is risky: the network hiccups, the service is briefly
 overloaded, or it goes down entirely. `ExternalService` wraps those calls with
-three complementary safety mechanisms:
+four complementary safety mechanisms:
 
 - **Retries** smooth over *transient* failures by trying again with configurable
   backoff and jitter.
@@ -21,6 +21,8 @@ three complementary safety mechanisms:
   failures cross a threshold the breaker opens and calls fail fast instead of
   piling up against a service that is already down.
 - A **rate limiter** keeps you under the call quota the service imposes.
+- A **concurrency limit** (the bulkhead pattern) bounds how many calls can be
+  in flight at once, catching a service that has degraded rather than failed.
 
 You wrap your call in a function, hand it to `ExternalService`, and all of the
 above is applied on every call.
@@ -65,8 +67,8 @@ children = [MyApp.Stripe]
 Supervisor.start_link(children, strategy: :one_for_one, name: MyApp.Supervisor)
 ```
 
-Now call it from anywhere; retries, circuit breaking, and rate limiting are
-applied automatically:
+Now call it from anywhere; retries, circuit breaking, rate limiting, and (if
+configured) the concurrency limit are applied automatically:
 
 ```elixir
 case MyApp.Stripe.charge(%{amount: 1000, currency: "usd", source: token}) do
@@ -101,6 +103,8 @@ with these guides:
 - **[Retries](guides/retries.md)** — backoff, jitter, attempt/time budgets, and
   retrying on exceptions.
 - **[Rate Limiting](guides/rate-limiting.md)** — staying under a quota.
+- **[Concurrency](guides/concurrency.md)** — bounding how many calls are in
+  flight at once with the bulkhead pattern.
 - **[Tuning](guides/tuning.md)** — choosing the retry, breaker and limiter
   settings *together*, with the measurements behind each rule.
 - **[Error Handling](guides/error-handling.md)** — `call` vs `call!` and the
@@ -109,13 +113,21 @@ with these guides:
   [Errata](https://hexdocs.pm/errata) errors: letting them drive retries, and
   what comes back when they don't succeed.
 - **[Telemetry](guides/telemetry.md)** — observing calls, retries, and trips.
-- **[Migrating to 3.0](guides/migrating-to-3.0.md)** — upgrading from 2.x.
+- **[Testing](guides/testing.md)** — driving retries, breaker trips, and
+  throttling from your test suite.
+- **[Running on more than one node](guides/distributed.md)** — sharing the
+  circuit breaker and rate limit across a cluster.
+- **[Flow Pipelines](guides/flow.md)** — guarded calls inside a `Flow`.
+- **[Cheatsheet](guides/cheatsheet.cheatmd)** — a one-page reference.
 - **[Migrating to 2.0](guides/migrating-to-2.0.md)** — upgrading from 1.x.
+- **[Migrating to 3.0](guides/migrating-to-3.0.md)** — upgrading from 2.x.
+- **[About](guides/about.md)** — the ideas behind the library and its history.
 
 ## Upgrading
 
-Version 3.0 changes several defaults and one behavior, and renames nothing: your
-code compiles unchanged and behaves differently. Start with the
+Version 3.0 changes four defaults and behaviors, and makes one dependency
+optional, and renames nothing: your code compiles unchanged and behaves
+differently. Start with the
 [3.0 migration guide](guides/migrating-to-3.0.md), whose first section tells you
 in about a minute which changes affect you.
 

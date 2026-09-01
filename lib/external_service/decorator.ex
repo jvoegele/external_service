@@ -39,7 +39,8 @@ if Code.ensure_loaded?(Decorator.Define) do
     The annotated function behaves exactly as if its body were passed to
     `ExternalService.call/2`: it returns the body's value on success, or a structured
     error (`ExternalService.RetriesExhausted` / `ExternalService.CircuitBreakerOpen` /
-    `ExternalService.ServiceNotStarted`) on failure.
+    `ExternalService.ServiceNotStarted` / `ExternalService.RateLimited` /
+    `ExternalService.ServiceSaturated`) on failure.
 
     The `service` argument is any term identifying a service that has been started
     (via `ExternalService.start/2` or `use ExternalService`). It need not be the

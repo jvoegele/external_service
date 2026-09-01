@@ -47,9 +47,10 @@ if Code.ensure_loaded?(Flow) do
       * **Errors are elements.** Because `call/3` *returns* structured errors
         rather than raising them, a failed element comes through the Flow as the
         `{:error, %ExternalService.RetriesExhausted{}}` /
-        `{:error, %CircuitBreakerOpen{}}` / `{:error, %ServiceNotStarted{}}` tuple
-        that `call/3` returns — `filter`/`partition` on them downstream. (This
-        module never uses `call!`, which would crash a Flow stage.)
+        `{:error, %CircuitBreakerOpen{}}` / `{:error, %ServiceNotStarted{}}` /
+        `{:error, %RateLimited{}}` / `{:error, %ServiceSaturated{}}` tuple that
+        `call/3` returns — `filter`/`partition` on them downstream. (This module
+        never uses `call!`, which would crash a Flow stage.)
 
       * **Unordered.** `Flow` partitions reorder elements. If you need results in
         input order, use `ExternalService.call_async_stream/5` instead.

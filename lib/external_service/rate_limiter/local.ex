@@ -29,7 +29,7 @@ defmodule ExternalService.RateLimiter.Local do
   # lock, so concurrent callers can never admit more than the limit allows.
   #
   # Times are tracked in microseconds so that an emission interval that does not
-  # divide evenly into milliseconds (say 100 calls per second) does not drift.
+  # divide evenly into milliseconds (say 3 calls per second) does not drift.
 
   @behaviour ExternalService.RateLimiter
 

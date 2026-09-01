@@ -3,8 +3,9 @@
 Many failures when calling an external service are _transient_: a momentary
 timeout, a brief overload, a connection reset. The simplest effective response is
 to try again — perhaps after a short backoff. `ExternalService` automates this
-using the [retry](https://hex.pm/packages/retry) library, exposing its
-flexibility through the `ExternalService.RetryOptions` struct.
+with backoff, jitter, and delay-cap logic ported from
+[Safwan Kamarrudin's retry library](https://hex.pm/packages/retry), exposed
+through the `ExternalService.RetryOptions` struct.
 
 ## Triggering a retry
 
@@ -23,14 +24,15 @@ call fn ->
     {:ok, %{status: 200} = resp}            -> {:ok, resp}
     {:ok, %{status: s}} when s in 500..599  -> {:retry, s}   # retry server errors
     {:ok, %{status: 429}}                   -> :retry        # retry throttling
-    {:ok, %{status: 4xx}} = resp            -> resp          # client error: don't retry
+    {:ok, %{status: s}} = resp when s in 400..499 -> resp     # client error: don't retry
     {:error, reason}                        -> {:error, reason}
   end
 end
 ```
 
-Each retry melts the service's circuit breaker, so a sustained run of retries
-will eventually open it. See [Circuit breakers](circuit-breakers.md).
+By default, a call melts the service's circuit breaker once, when its retrying
+gives up — not on every retry — so a sustained run of failing calls will
+eventually open it. See [Circuit breakers](circuit-breakers.md).
 
 ## Retrying on the return value with `:retry_on`
 
@@ -126,8 +128,8 @@ retry: [backoff: :exponential, base: 100]
 `:base`:
 
 ```elixir
-retry: [backoff: :linear, base: 100, factor: 1]
-# delays grow ~100ms, 200ms, 300ms, 400ms, ...
+retry: [backoff: :linear, base: 100, factor: 50]
+# delays grow 100ms, 150ms, 200ms, 250ms, ...
 ```
 
 ## Bounding retries
@@ -161,8 +163,10 @@ retry: [max_attempts: 5, expiry: :timer.seconds(5), backoff: :exponential, base:
 >
 > If your dependency needs longer, raise `:base` rather than the attempt count:
 > `base: 100` gives the same five attempts across 1.5 seconds, and is the usual
-> starting point for an HTTP service. Raising `:max_attempts` instead makes the
-> circuit breaker trip sooner, for the reason in the warning below.
+> starting point for an HTTP service. Under the default circuit-breaker `:melt`
+> setting, raising `:max_attempts` does not affect when the breaker trips — see
+> [`:tolerate` counts calls, not attempts](circuit-breakers.md#what-counts-as-a-failure)
+> — but it does mean each call spends longer retrying before it gives up.
 
 ### Nothing here bounds a single attempt
 
@@ -218,7 +222,7 @@ attempt is the caller's job; see
 Retrying without a count bound is available, but it has to be asked for:
 
 ```elixir
-ExternalService.start(:my_service, retry: [max_attempts: :infinity])
+ExternalService.start(:my_service, retry: [max_attempts: :infinity, expiry: :timer.seconds(30)])
 ```
 
 That is the right answer for some work — a background job that should keep trying
@@ -226,9 +230,14 @@ until it succeeds, where there is nowhere else for the failure to go. It is
 almost never the right answer in a request path, where a call that never returns
 is worse than one that fails.
 
-If you do reach for it, pair it with an `:expiry`, or at least a `:cap` so the
-delay between attempts doesn't grow without limit. And read the warning above
-first: the circuit breaker will not reliably stop the retrying for you.
+An `:expiry` is not optional here: under the default circuit-breaker `:melt`
+setting, a call that never gives up never melts the breaker, so
+`max_attempts: :infinity` with no `:expiry` is rejected at `start/2` — there
+would be nothing at all to stop it. `:cap` is worth setting too, so the delay
+between attempts doesn't grow without limit, but it does not substitute for
+`:expiry`. And read the warning above first: even with an `:expiry`, the
+circuit breaker will not reliably stop the retrying for you before that budget
+runs out.
 
 ## Capping the delay
 
@@ -365,7 +374,7 @@ A solid default for an HTTP-style dependency:
 
 ```elixir
 use ExternalService,
-  circuit_breaker: [tolerate: 15, within: :timer.seconds(5), reset: :timer.seconds(5)],
+  circuit_breaker: [tolerate: 2, within: :timer.seconds(5), reset: :timer.seconds(5)],
   retry: [
     backoff: :exponential,
     base: 100,
@@ -378,13 +387,14 @@ use ExternalService,
 
 This retries transient failures with jittered exponential backoff, never waits
 more than 2 seconds between attempts, gives up after 5 attempts or 10 seconds,
-and opens the circuit breaker on the third consecutive fully-failing call.
+and opens the circuit breaker on the third consecutive fully-failing call
+(`tolerate: 2` melts, then opens on the next).
 
 The breaker settings are sized against the retry settings rather than picked
-independently, and that is not optional. Five attempts spread over a ~1.5 second
-retry window means `:within` has to be wider than 1.5 seconds for the melts to
-accumulate at all, and `:tolerate` has to be about `3 × max_attempts` for three
-calls to be what trips it. Get that wrong and the breaker never opens: see
-[Sizing the breaker](tuning.md#sizing-the-breaker)
+independently, and that is not optional. A call melts the breaker once, when its
+retrying gives up — and giving up can itself take up to the retry window, about
+1.5 seconds here. So `:within` has to be wide enough for `:tolerate + 1` of those
+windows to fit, not just the width of a single attempt. Get that wrong and the
+breaker never opens: see [Sizing the breaker](tuning.md#sizing-the-breaker)
 for the measurement, and the [Tuning](tuning.md) guide for choosing all of these
 together.

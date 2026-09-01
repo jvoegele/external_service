@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-09-01
+
+A documentation accuracy pass across every guide, the CHANGELOG, and the published moduledocs.
+Nothing about a guarded call changes; one type signature grows to say what it already did.
+
+### Fixed
+
+- **`:tolerate` is now described consistently as counting failed *calls*, not attempts,
+  everywhere it's discussed.** Several guides, the cheatsheet, `usage-rules.md`, and one
+  CHANGELOG entry still described the pre-3.0 semantics — `tolerate ≈ failing calls ×
+  max_attempts` — after 3.0 changed the default to counting failed calls. All now agree with
+  the correct explanation that already existed elsewhere in the same documents.
+- **The concurrency limit (the bulkhead pattern) is documented as a fourth mechanism
+  throughout**, not just in the modules and the cheatsheet — the README, `about.md`,
+  `getting-started.md`, and `the-front-door.md` previously described only three.
+- **Several examples that didn't actually work.** `usage-rules.md`'s own quick-start example
+  tripped `ConfigCheck`'s "narrow window" warning at compile time; `rate-limiting.md`'s
+  `:sleep_function` example and `migrating-to-2.0.md`'s "After (2.0)" example had the same
+  class of problem; `retries.md`'s first code block had a literal syntax error (`4xx` is not
+  valid Elixir).
+- **Numeric claims that had drifted from the code**, caught by running the library against
+  every worked example rather than re-deriving formulas by hand: the `:expiry` timing table,
+  rate-limiter shed-rate percentages, several `simulate/3` and `explain/1` sample outputs, and
+  a handful of retry-window figures.
+- **A nonexistent Errata function.** `usage-rules.md` called a `root_error` function on
+  `Errata` that doesn't exist in the pinned errata version, and claimed `Errata.root_cause/1`
+  is deprecated (it isn't) — corrected to match `errata.md`'s existing, correct usage.
+- Assorted smaller inconsistencies: missing error types in `flow.md`'s and `Decorator`'s error
+  lists, `reset_all/1` undercounting what it clears in several places, stale rate-limiter
+  backend callback counts, a malformed CHANGELOG heading, and a couple of stale cross-reference
+  anchors.
+
+### Changed
+
+- The `t:ExternalService.error/0` typespec now includes `ExternalService.ServiceSaturated.t()`,
+  which `call/3` could already return but the union didn't declare.
+
 ## [3.2.0] - 2026-08-25
 
 Agent usage rules, shipped in the package. Nothing about a guarded call changes.
@@ -28,7 +65,7 @@ Agent usage rules, shipped in the package. Nothing about a guarded call changes.
     and HEAD only, so a POST behaves differently under identical configuration);
   * `max_attempts: 5` at the default `base: 10` is 150 ms of total waiting — raise `:base`, not
     the attempt count;
-  * `:tolerate` counts failed **attempts**, and the window has to be wide enough to contain the
+  * `:tolerate` counts failed **calls**, and the window has to be wide enough to contain the
     melts or the breaker never opens, silently — reach for `explain/1`, `simulate/3` and
     `ConfigCheck` rather than hand-tuning;
   * `:wait` depends on **where the call is made**, not on the service;
@@ -516,9 +553,9 @@ a minute which of these affect you, by grepping two strings out of your boot log
 
   | offered load | `wait: false` | one window | 2 × window |
   | --- | --- | --- | --- |
-  | 2× instantaneous burst | 50% shed | **0% shed** | 0% shed |
-  | 2× sustained | 27–35% shed | 15–17% shed | 1–5% shed, ~2× the latency |
-  | 6× sustained | 71–75% shed | 64–67% shed | 55–58% shed |
+  | 2× instantaneous burst | 50% shed | **about 1% shed** | less |
+  | 2× sustained | 27–35% shed | about 9% shed | less, at roughly 2× the latency |
+  | 6× sustained | 71–75% shed | about 50% shed | less, at roughly 2× the latency |
 
   A burst is absorbed completely; sustained overload is still shed, which is the
   point — shedding is the right answer to real overload, and the larger budget
@@ -624,10 +661,10 @@ a minute which of these affect you, by grepping two strings out of your boot log
 
   | `:expiry` | 2.x | 3.0 |
   | --------- | --- | --- |
-  | 1ms | 2 attempts, 103ms | 2 attempts, 4ms |
-  | 50ms | 2 attempts, 100ms | 4 attempts, 51ms |
-  | 250ms | 6 attempts, 254ms | 6 attempts, 250ms — unchanged |
-  | 1000ms | 8 attempts, 1001ms | 8 attempts, 1000ms — unchanged |
+  | 1ms | 2 attempts, 103ms | 2 attempts, 1ms |
+  | 50ms | 2 attempts, 100ms | 4 attempts, 50ms |
+  | 250ms | 6 attempts, 250ms | 6 attempts, 250ms — unchanged |
+  | 1000ms | 8 attempts, 1000ms | 8 attempts, 1000ms — unchanged |
 
   **Only budgets under ~100ms are affected**; the floor never engaged above that.
   Note that such a budget changes in both directions at once — more attempts, in
@@ -930,7 +967,7 @@ a minute which of these affect you, by grepping two strings out of your boot log
   retries, which reads like a wall-clock bound on the call. It is evaluated
   *between* attempts, so it bounds when the next attempt starts and never how
   long the current one runs. Measured with `max_attempts: 4, expiry: 100` against
-  a function sleeping 300ms per attempt: 2 attempts, **706ms total** — seven times
+  a function sleeping 300ms per attempt: 2 attempts, **621ms total** — six times
   the budget. A function that never returns is never bounded by it at all. Both
   measurements are now pinned by tests.
 - **The circuit breaker guide names what the library does not bound** — attempt
@@ -1325,7 +1362,7 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
   (matching `start/2`), not only atoms, and is idempotent — it is safe to call
   on a service that was never started or has already been stopped.
 
-## 1.1.4 - 2024-01-04
+## [1.1.4] - 2024-01-04
 ### Fixed
 - Replace use of deprecated `System.stacktrace/0` with `__STACKTRACE__/0` ([PR #17 from @iperks](https://github.com/jvoegele/external_service/pull/17))
 
@@ -1362,7 +1399,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/3.1.0...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/3.2.1...HEAD
+[3.2.1]: https://github.com/jvoegele/external_service/compare/3.2.0...3.2.1
 [3.2.0]: https://github.com/jvoegele/external_service/compare/3.1.0...3.2.0
 [3.1.0]: https://github.com/jvoegele/external_service/compare/3.0.0...3.1.0
 [3.0.0]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.4...3.0.0
@@ -1379,6 +1417,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 [2.2.0]: https://github.com/jvoegele/external_service/compare/2.1.0...2.2.0
 [2.1.0]: https://github.com/jvoegele/external_service/compare/2.0.0...2.1.0
 [2.0.0]: https://github.com/jvoegele/external_service/compare/1.1.4...2.0.0
+[1.1.4]: https://github.com/jvoegele/external_service/compare/1.1.3...1.1.4
+[1.1.3]: https://github.com/jvoegele/external_service/compare/1.1.2...1.1.3
 [1.1.2]: https://github.com/jvoegele/external_service/compare/1.1.1...1.1.2
 [1.1.1]: https://github.com/jvoegele/external_service/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/jvoegele/external_service/compare/1.0.1...1.1.0

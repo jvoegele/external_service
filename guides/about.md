@@ -1,16 +1,18 @@
 # About ExternalService
 
 `ExternalService` is an Elixir library for safely calling external services and
-APIs, combining three well-established reliability techniques behind one small
+APIs, combining four well-established reliability techniques behind one small
 interface:
 
 - **Retries** for transient failures,
-- the **Circuit Breaker** pattern for persistent failures, and
-- **rate limiting** for staying within a service's quota.
+- the **Circuit Breaker** pattern for persistent failures,
+- **rate limiting** for staying within a service's quota, and
+- a **concurrency limit** (the bulkhead pattern) for bounding how many calls are
+  in flight at once.
 
 Calls can be synchronous, asynchronous background tasks, or fanned out in
 parallel for MapReduce-style processing — all under the same retry, circuit
-breaker, and rate-limiting protection.
+breaker, rate-limiting, and concurrency protection.
 
 ## The ideas
 
@@ -20,7 +22,7 @@ Many failures when accessing an external service are transient: network
 congestion causing a timeout, or a service briefly under heavy load. The best
 response is often simply to try again after a short backoff. `ExternalService`
 automates retry logic — linear or exponential backoff, jitter, delay caps, and
-both attempt-count and time budgets — using
+both attempt-count and time budgets — with delay-stream logic ported from
 [Safwan Kamarrudin's retry library](https://hex.pm/packages/retry). See
 [Retries](retries.md).
 
@@ -46,9 +48,22 @@ managing the underlying fuse for you — you never call `:fuse.ask` or
 ### Rate limiting
 
 Many services impose a request quota. `ExternalService` can keep you under it
-automatically and application-wide with a built-in token bucket: excess calls
-sleep until there is room, rather than failing. A pluggable backend enforces the
-limit across a whole cluster. See [Rate limiting](rate-limiting.md).
+automatically with a built-in token bucket: excess calls sleep for up to a
+bounded budget to absorb bursts, then fail fast with a structured error rather
+than piling up. The default backend meters each node's own traffic; a
+pluggable backend can instead enforce one limit across a whole cluster. See
+[Rate limiting](rate-limiting.md).
+
+### Concurrency limiting
+
+Retries bound how many *failures* you tolerate and the rate limiter bounds how
+*often* calls start — neither bounds how many are in flight **at once**. That
+gap opens when a service degrades rather than fails outright: calls still
+succeed, just slowly, so neither the breaker nor the limiter notices, and
+callers pile up holding connections. A concurrency limit (the bulkhead pattern)
+caps that directly: over the limit, a call returns
+`ExternalService.ServiceSaturated` instead of queuing indefinitely. See
+[Concurrency](concurrency.md).
 
 ## History
 
@@ -62,7 +77,8 @@ The 2.0 line is a ground-up modernization of that original library — validated
 and self-documenting options, telemetry, circuit-breaker introspection,
 structured errors, and a declarative module front door (`use ExternalService`) —
 while keeping the core idea unchanged: wrap a call in a function, hand it over,
-and let retries, the circuit breaker, and rate limiting just work.
+and let retries, the circuit breaker, rate limiting, and the concurrency limit
+just work.
 
 ## License
 

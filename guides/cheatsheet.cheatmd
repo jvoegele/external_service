@@ -92,10 +92,10 @@ end
 
 ```elixir
 circuit_breaker: [
-  tolerate: 5,                # failed ATTEMPTS per window (default 10);
-                              # retries melt too, so tolerate ≈
-                              # failing calls × max_attempts
-  within: :timer.seconds(1),  # window ms (default 10_000)
+  tolerate: 5,                # failed CALLS tolerated (default 10);
+                              # a call melts once, when its retrying gives up —
+                              # independent of :max_attempts
+  within: :timer.seconds(1),  # window ms (default :auto, never below 10_000)
   reset: :timer.seconds(5)    # ms open before reset (default 60_000)
 ]
 
@@ -136,10 +136,10 @@ IO.puts ExternalService.explain(MyApp.Api)
 
 # does the breaker actually open? (virtual clock, nothing sleeps)
 ExternalService.simulate(MyApp.Api, :always_failing)
-#=> %Simulation{opens_after: 4, worst_call: 1500, attempts: 20, ...}
+#=> %Simulation{opens_after: 6, worst_call: 150, attempts: 30, ...}
 
 # how long does a fully-failing call wait?
-ExternalService.RetryOptions.window(base: 100, max_attempts: 5)   #=> 1500
+ExternalService.RetryOptions.window(base: 10, max_attempts: 5)   #=> 150
 ```
 
 Both take a proposed keyword list too, so you can try a configuration before
@@ -279,15 +279,18 @@ retry: [retry_exceptions: &match?(%MyApp.HTTPError{status: s} when s >= 500, &1)
 # Retry on the result of an unmodified function
 retry: [retry_on: &match?({:error, %{status: 500}}, &1)]
 
-# Deliberately unbounded (opts out of the max_attempts: 5 default)
-retry: [max_attempts: :infinity, cap: 30_000]
+# Deliberately unbounded (opts out of the max_attempts: 5 default);
+# :expiry is required here — without it, start/2 raises
+retry: [max_attempts: :infinity, expiry: :timer.seconds(30), cap: 30_000]
 ```
 
 > #### `max_attempts: 5` is a bound, not an allowance {: .warning}
 >
 > With the default `base: 10` that is 150ms of waiting in total. For a real
 > dependency raise `:base`, not the attempt count. `max_attempts: :infinity`
-> retries forever — the circuit breaker does not reliably stop it.
+> retries forever and needs an `:expiry` — under the default breaker `:melt`
+> setting, a call that never gives up never melts it, so `start/2` rejects
+> the combination without one.
 
 ## Error handling
 {: .col-2}
@@ -354,7 +357,9 @@ rescue
  retry: [max_attempts: 1]}
 ```
 
-Both `:infinity` keys remove state, so nothing leaks between tests.
+Both `:infinity` keys remove state, so nothing leaks between tests. A
+`:concurrency` limit has no `:infinity` override — omit the `:concurrency` key
+in test config, or use `ExternalService.reset_all/1` between tests instead.
 
 ### Isolate per test
 
@@ -370,7 +375,7 @@ end
 
 ```elixir
 setup do
-  MyApp.Api.reset_all()   # breaker + limiter
+  MyApp.Api.reset_all()   # breaker + rate limiter + concurrency limit
   :ok
 end
 ```

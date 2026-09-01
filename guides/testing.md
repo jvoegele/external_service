@@ -9,9 +9,11 @@ ask you to hand-write — `use ExternalService.Test` imports them, and each sect
 below uses them where they apply. The explanations stay, because the helpers
 replace the typing, not the model.
 
-Every example here is executed as part of this library's own suite
+Most examples here are executed as part of this library's own suite
 (`test/testing_guide_examples_test.exs`), so they compile and their assertions
-hold.
+hold. The `ExternalService.simulate/3` examples below are the exception —
+`MyApp.Payments` is illustrative, standing in for whatever service you'd
+actually simulate, so those two are not themselves pinned by a test.
 
 ## The one thing to know first: service state is global
 
@@ -97,7 +99,7 @@ refute ExternalService.blown?(two)
 >
 > ```
 > ** (NimbleOptions.ValidationError) unknown options [:name],
->    valid options are: [:circuit_breaker, :rate_limit, :retry, :sleep_function]
+>    valid options are: [:circuit_breaker, :rate_limit, :concurrency, :retry, :sleep_function]
 > ```
 >
 > So every test exercising `MyApp.Stripe` shares one breaker and one bucket, no
@@ -111,8 +113,8 @@ refute ExternalService.blown?(two)
 
 Where per-test services are impractical — which is most of the time with a
 front-door module — reset the shared service instead. `ExternalService.reset_all/1`
-clears both stateful mechanisms, so nothing a test does to the breaker or the
-rate limit budget survives into the next one:
+clears all three stateful mechanisms, so nothing a test does to the breaker,
+the rate limit budget, or the concurrency limit survives into the next one:
 
 ```elixir
 setup do
@@ -122,9 +124,9 @@ end
 ```
 
 Use `reset_all/1` rather than `reset/1` here. `reset/1` closes the breaker and
-deliberately leaves the limiter alone, because clearing a limiter in production
-releases a burst at the service — so a test that drained the budget would leave
-the next one throttled.
+deliberately leaves the rate limiter and concurrency limit alone, because
+clearing a limiter in production releases a burst at the service — so a test
+that drained the budget would leave the next one throttled.
 
 Resetting **shares** state rather than isolating it, so it does not make
 concurrent tests independent: two `async: true` tests can still interleave a
@@ -227,9 +229,14 @@ never comes into play at all.
 > immediately, still says wait, and the loop spins until real time has passed. The
 > call takes exactly as long and burns a core doing it.
 >
-> Measured at `limit: 1, per: 2_000`, the throttled call still took **2000ms**
-> and invoked the no-op **2,075,418 times**. The same applies to waiting for a
-> concurrency slot, which is also waiting on something else to happen.
+> Measured at `limit: 1, per: 2_000, wait: :infinity`, the throttled call still
+> took **2000ms** and invoked the no-op **2,075,418 times** (the exact count is
+> machine-dependent — expect a different number on a different machine, but the
+> same order of magnitude). The explicit `:infinity` matters: the *default* wait
+> budget is exactly one window, which sits right at the boundary this loop
+> checks against, so it fails fast with `RateLimited` instead of spinning
+> through it. The same applies to waiting for a concurrency slot, which is also
+> waiting on something else to happen.
 >
 > Retry backoff is the exception, because the delays are a fixed sequence rather
 > than a re-check loop — see [Retries](#retries) above.
@@ -341,11 +348,12 @@ metadata = assert_retried(service)
 assert metadata.reason == :service_unavailable
 ```
 
-`refute_retried/2`, `assert_breaker_blown/2` and `assert_throttled/2` cover the
-other three events. `refute_retried/2` earns its place rather than being
-reflexive symmetry — a retry that did *not* happen leaves nothing in the return
-value to assert on instead. All the events are listed in the
-[Telemetry](telemetry.md) guide.
+`refute_retried/2` is the negative case for the same retry event.
+`assert_breaker_blown/2` and `assert_throttled/2` cover the two other events —
+the breaker tripping and a call being throttled. `refute_retried/2` earns its
+place rather than being reflexive symmetry — a retry that did *not* happen
+leaves nothing in the return value to assert on instead. All the events are
+listed in the [Telemetry](telemetry.md) guide.
 
 ## Making a service inert
 
@@ -375,14 +383,21 @@ large:
 | `rate_limit: [limit: :infinity]` | Installs no limiter. Calls pass straight through. |
 | `retry: [max_attempts: 1]` | One attempt; a `:retry` return becomes `RetriesExhausted`. |
 
-`:infinity` matters more than it looks. The breaker and the limiter are the two
-**stateful** mechanisms — the ones that accumulate across tests — and until they
-had an off switch you could only set them very large. Large is finite: a suite
-long enough to accumulate `:tolerate` melts starts failing tests that have
-nothing to do with the breaker, and the failure looks like flakiness. `:infinity`
-removes the state rather than postponing it, which also means it no longer
-matters that a front-door module can't vary its `:name` per test — inert
-mechanisms have nothing to share.
+`:infinity` matters more than it looks. The breaker, the rate limiter, and the
+concurrency limit are the three **stateful** mechanisms — the ones that
+accumulate across tests — and until the breaker and the limiter had an off
+switch you could only set them very large. Large is finite: a suite long enough
+to accumulate `:tolerate` melts starts failing tests that have nothing to do
+with the breaker, and the failure looks like flakiness. `:infinity` removes the
+state rather than postponing it, which also means it no longer matters that a
+front-door module can't vary its `:name` per test — inert mechanisms have
+nothing to share.
+
+The concurrency limit has no `:infinity` off switch — `:limit` is a required
+positive integer — so omit `:concurrency` from a shared test service's
+configuration if you don't need it exercised, or reach for
+`ExternalService.reset_all/1` (see above) to clear whatever state it
+accumulated.
 
 Because the merge is deep, you override only the keys you name; `:within`,
 `:reset`, and `:per` all fall back to the module-level configuration. See

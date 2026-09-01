@@ -130,7 +130,7 @@ circuit_breaker: [tolerate: 3]
 ```
 
 Measured with `base: 100, max_attempts: 5`: the breaker opens on the **4th**
-consecutive fully-failing call, and a single failing call takes about 1.4
+consecutive fully-failing call, and a single failing call takes about 1.5
 seconds.
 
 `:within` — the window those failures are counted over — defaults to `:auto` and
@@ -169,9 +169,9 @@ use ExternalService,
   # :wait defaults to one window, which is what you want here
 ```
 
-Measured: a fully-failing call takes about **670ms**, and the breaker opens on the
+Measured: a fully-failing call takes about **700ms**, and the breaker opens on the
 **4th** consecutive one. After that, callers get `CircuitBreakerOpen` immediately
-instead of waiting 670ms to fail. `:within` resolves to 10 seconds.
+instead of waiting 700ms to fail. `:within` resolves to 10 seconds.
 
 Note what the `:expiry` is for. It is not bounding the backoff — 700ms of waiting
 is nowhere near a second. It bounds the case the attempt count cannot: a *slow*
@@ -252,7 +252,7 @@ ran. Throttling is not failure. See [Rate limiting](rate-limiting.md).
 
 ## A checklist
 
-Four of the seven items this guide used to carry are now checked for you when you
+Four of the nine items this guide used to carry are now checked for you when you
 compile. What is left needs a human:
 
 - [ ] Read your retry window off `explain/1` — is it inside the latency budget of whoever is calling?

@@ -57,6 +57,18 @@ defmodule ExternalService do
       throttled and put to sleep to stay within the configured rate limit.
       * Measurements: `:sleep_time` (milliseconds)
       * Metadata: `:service`
+
+    * `[:external_service, :concurrency, :rejected]` - emitted when a call is
+      shed because the service's concurrency limit was fully in use.
+      * Measurements: `:limit`, `:wait_time` (milliseconds spent waiting, `0`
+        unless a `:wait` budget is configured)
+      * Metadata: `:service`
+
+    * `[:external_service, :concurrency, :waited]` - emitted when a call had to
+      wait for a slot but got one before its `:wait` budget ran out. Calls served
+      without waiting emit nothing.
+      * Measurements: `:limit`, `:wait_time` (milliseconds waited)
+      * Metadata: `:service`
   """
 
   alias ExternalService.CircuitBreaker
@@ -70,6 +82,7 @@ defmodule ExternalService do
   alias ExternalService.Retry
   alias ExternalService.RetryOptions
   alias ExternalService.ServiceNotStarted
+  alias ExternalService.ServiceSaturated
   alias ExternalService.Simulation
   alias ExternalService.Simulator
 
@@ -107,9 +120,16 @@ defmodule ExternalService do
   @typedoc "Error returned when a call is throttled beyond the rate limit `:wait` budget"
   @type rate_limited :: {:error, RateLimited.t()}
 
+  @typedoc "Error returned when a call is shed because the concurrency limit was full"
+  @type service_saturated :: {:error, ServiceSaturated.t()}
+
   @typedoc "Union type representing all the possible error return values"
   @type error ::
-          retries_exhausted | circuit_breaker_open | service_not_started | rate_limited
+          retries_exhausted
+          | circuit_breaker_open
+          | service_not_started
+          | rate_limited
+          | service_saturated
 
   @type retriable_function_result ::
           :retry | {:retry, reason :: any()} | (function_result :: any())
@@ -158,7 +178,7 @@ defmodule ExternalService do
           "sizes the window against the retry options instead, since how long it takes " <>
           "`:tolerate` failures to arrive depends on how long a failing call takes. It is " <>
           "a floor, never narrower than the 10 seconds it replaces — see " <>
-          "[Sizing the window](tuning.md) for when to set it yourself."
+          "[Sizing the breaker](tuning.md) for when to set it yourself."
     ],
     reset: [
       type: :pos_integer,
@@ -599,8 +619,8 @@ defmodule ExternalService do
 
         circuit breaker
           opens after      4 failing calls
-          counting window  10.0s
-          resets after     60.0s
+          counting window  10s
+          resets after     60s
           backend          ExternalService.CircuitBreaker.Fuse
 
         rate limit
@@ -1362,7 +1382,7 @@ defmodule ExternalService do
   ## Options
 
   Accepts the same options as `start/2` (`:circuit_breaker`, `:rate_limit`,
-  `:retry`, `:sleep_function`), plus:
+  `:concurrency`, `:retry`, `:sleep_function`), plus:
 
     * `:name` - the term that identifies the service. Defaults to the module name.
 
@@ -1397,8 +1417,8 @@ defmodule ExternalService do
       end
 
       @doc """
-      Starts the service (installing its circuit breaker and rate limiter) linked
-      to the current process.
+      Starts the service (installing its circuit breaker, rate limiter, and
+      concurrency limit, if configured) linked to the current process.
 
       `overrides` are deep merged with the options given to `use ExternalService`.
       """
@@ -1469,7 +1489,7 @@ defmodule ExternalService do
       @doc "Resets the circuit breaker. See `ExternalService.reset/1`."
       def reset, do: ExternalService.reset(@__external_service__)
 
-      @doc "Resets the circuit breaker and the rate limiter. See `ExternalService.reset_all/1`."
+      @doc "Resets the circuit breaker, the rate limiter, and the concurrency limit. See `ExternalService.reset_all/1`."
       def reset_all, do: ExternalService.reset_all(@__external_service__)
     end
   end

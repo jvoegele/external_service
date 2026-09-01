@@ -1,7 +1,7 @@
 defmodule ExternalService.Mixfile do
   use Mix.Project
 
-  @version "3.2.0"
+  @version "3.2.1"
   @source_url "https://github.com/jvoegele/external_service"
 
   def project do
@@ -25,7 +25,7 @@ defmodule ExternalService.Mixfile do
 
       # Hex
       description:
-        "Elixir library for safely using any external service or API using automatic retry with rate limiting and circuit breakers. Calls to external services can be synchronous, asynchronous background tasks, or multiple calls can be made in parallel for MapReduce style processing.",
+        "Elixir library for safely using any external service or API using automatic retry, circuit breakers, rate limiting, and a concurrency limit. Calls to external services can be synchronous, asynchronous background tasks, or multiple calls can be made in parallel for MapReduce style processing.",
       package: package(),
 
       # Docs

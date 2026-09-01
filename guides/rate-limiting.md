@@ -99,9 +99,10 @@ converts overload into latency and process growth.
 One window is the value because it is the most a limiter can ask you to wait for
 the next refill, so it absorbs a burst exactly and no more. Measured at
 `limit: 50, per: 1_000` against an instantaneous burst of twice the limit, a
-one-window budget takes shedding from 50% to 0% — while a *sustained* 2x overload
-still sheds around 15%, which is the point. Shedding is the right answer to real
-overload; the wait exists to absorb bursts, not to hide saturation.
+one-window budget takes shedding from 50% to about 1% — while a *sustained* 2x
+overload still sheds about 9%, which is the point (see the measured table
+below). Shedding is the right answer to real overload; the wait exists to
+absorb bursts, not to hide saturation.
 
 The cap matters for a service with a large window. A per-minute quota
 (`limit: 100, per: :timer.minutes(1)`) would otherwise block a caller for a full
@@ -265,13 +266,23 @@ By default sleeping uses `Process.sleep/1`. You can substitute your own with
 otherwise sleep:
 
 ```elixir
-use ExternalService,
-  rate_limit: [limit: 100, per: :timer.seconds(1), wait: :timer.seconds(1)],
-  sleep_function: fn ms ->
+defmodule MyApp.RateLimitHooks do
+  def record_and_sleep(ms) do
     :ok = MyApp.Metrics.record_throttle(ms)
     Process.sleep(ms)
   end
+end
+
+use ExternalService,
+  rate_limit: [limit: 100, per: :timer.seconds(1), wait: :timer.seconds(1)],
+  sleep_function: &MyApp.RateLimitHooks.record_and_sleep/1
 ```
+
+`use ExternalService` stores its options in a module attribute, which cannot
+hold a closure — only a named function capture (`&Mod.fun/arity`) survives
+that. `ExternalService.start/2` has no such restriction and accepts an
+anonymous function directly. See the "Anonymous functions and `use
+ExternalService`" callout in [Retries](retries.md#deciding-per-exception-rather-than-per-type).
 
 This is an **instrumentation hook**, not a way to skip the wait.
 
@@ -282,8 +293,14 @@ This is an **instrumentation hook**, not a way to skip the wait.
 > says wait, and the loop spins until real time has actually passed — so the call
 > takes just as long and burns a core doing it.
 >
-> Measured at `limit: 1, per: 2_000` with a counting no-op: the throttled call
-> still took **2000ms**, and the sleep function was invoked **2,075,418 times**.
+> Measured at `limit: 1, per: 2_000, wait: :infinity` with a counting no-op: the
+> throttled call still took **2000ms**, and the sleep function was invoked
+> **2,075,418 times** (the exact count is a function of how fast the machine
+> spins, not of the behavior under test — expect a different number on a
+> different machine, but the same order of magnitude). The explicit `:infinity`
+> matters here: the *default* wait budget is exactly one window, which sits
+> right at the boundary this loop is checking against, so it fails fast with
+> `RateLimited` instead of spinning through it.
 >
 > To keep a rate-limited test off the clock, use `wait: false` and assert on the
 > `ExternalService.RateLimited` error, or configure a limit the test never
@@ -330,13 +347,17 @@ use ExternalService,
 Hammer is not a dependency of this library — the backend calls `hit/3` on the
 module you supply, so you only add Hammer itself.
 
-Writing your own backend is a matter of implementing two callbacks, `init/2` and
-`check/2`, where `check/2` answers `:ok` or `{:wait, milliseconds}`. See
-`ExternalService.RateLimiter`, and the [Distributed Elixir](distributed.md) guide
-for the wider picture of running on more than one node.
+Writing your own backend is a matter of implementing four callbacks —
+`init/2`, `check/2`, `peek/2`, and `reset/2` — where `check/2` answers `:ok` or
+`{:wait, milliseconds}`. See `ExternalService.RateLimiter`, and the
+[Distributed Elixir](distributed.md) guide for the wider picture of running on
+more than one node.
 
 ## Rate limiting and the circuit breaker
 
 Rate-limit sleeps are independent of the circuit breaker: being throttled is not
-a failure and does not melt the breaker. A throttled call waits and then runs
-normally, succeeding or failing on its own merits.
+a failure and does not melt the breaker, whether or not the call is eventually
+admitted. A throttled call that gets admitted runs normally, succeeding or
+failing on its own merits; one that exhausts its `:wait` budget instead returns
+`ExternalService.RateLimited` without running the function at all — see
+[Bounding the wait](#bounding-the-wait).
