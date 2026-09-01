@@ -1211,7 +1211,7 @@ defmodule ExternalService do
     # in Errata's `:reason` field (which is an atom classifier). When it happens to
     # be an exception — any Errata error included — it is *also* set as the
     # `:cause`, which is the slot Errata means for it: that is what makes
-    # `Errata.root_cause/1` reach the underlying failure and
+    # `Errata.root_error/1` reach the underlying failure and
     # `Errata.format_chain/1` print the chain. A non-exception reason leaves
     # `:cause` unset rather than
     # wrapping a bare term that would only add noise to the formatted output.

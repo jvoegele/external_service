@@ -50,7 +50,7 @@ defmodule ExternalService.Mixfile do
     [
       {:fuse, "~> 2.5"},
       {:decorator, "~> 1.4", optional: true},
-      {:errata, "~> 1.5"},
+      {:errata, "~> 1.8"},
       {:flow, "~> 1.2", optional: true},
       {:nimble_options, "~> 1.1"},
       {:telemetry, "~> 1.0"},

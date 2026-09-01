@@ -158,7 +158,7 @@ own accessors:
 {:error, error} = MyApp.Stripe.call(fn -> {:retry, MyApp.UpstreamTimeout.new()} end)
 
 Errata.cause(error)       #=> %MyApp.UpstreamTimeout{}
-Errata.root_cause(error)  #=> the deepest cause, following the chain
+Errata.root_error(error)  #=> the deepest Errata error, following the chain
 Errata.format_chain(error)
 #=> ExternalService.RetriesExhausted: exhausted all retries while calling the external service
 #=> Caused by: MyApp.UpstreamTimeout: the upstream service timed out

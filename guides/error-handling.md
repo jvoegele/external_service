@@ -45,7 +45,7 @@ digging into `:context`:
 {:error, error} = ExternalService.call(:my_service, fn -> {:retry, upstream_error} end)
 
 Errata.cause(error)       #=> the upstream error
-Errata.root_cause(error)  #=> the deepest cause, if it wrapped one of its own
+Errata.root_error(error)  #=> the deepest Errata error, if it wrapped one of its own
 Logger.error(Errata.format_chain(error))
 #=> ExternalService.RetriesExhausted: exhausted all retries while calling the external service
 #=> Caused by: MyApp.UpstreamTimeout: upstream timed out
