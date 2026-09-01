@@ -113,10 +113,10 @@ limit; see the [Concurrency Limiting](concurrency.md) guide. Like `RateLimited`
 it means the wrapped function never ran, so neither melts the circuit breaker and
 neither is retried.
 
-`RateLimited` only appears for services that bound the wait with `wait: false` or
-a millisecond budget — with `wait: :infinity`, or with `:wait` left unset, a
-throttled call waits as long as it takes rather than failing. See the
-[Rate limiting](rate-limiting.md) guide.
+`RateLimited` only appears for services that bound the wait: `wait: false`, an
+explicit millisecond budget, or the default of one window (`:per`) capped at 5
+seconds. Only `wait: :infinity` waits as long as it takes instead, and never
+produces this error. See the [Rate limiting](rate-limiting.md) guide.
 
 ## `call` — errors as values
 

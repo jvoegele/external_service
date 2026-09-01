@@ -276,7 +276,7 @@ defmodule ExternalService.RateLimiter do
   # One window is the value because it is the most a limiter can ask a caller to
   # wait for the next refill, so it absorbs a burst exactly and no more. Measured
   # at `limit: 50, per: 1_000` against a 2x instantaneous burst, it takes shedding
-  # from 50% to 0% on both backends while still shedding sustained overload —
+  # from 50% to about 1% on both backends while still shedding sustained overload —
   # which is the point, since shedding is the right answer to real overload rather
   # than converting it into latency. On the fixed-window `Hammer` backend it is
   # also structural: a window boundary is never more than `:per` away.

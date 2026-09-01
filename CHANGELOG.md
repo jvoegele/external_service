@@ -624,10 +624,10 @@ a minute which of these affect you, by grepping two strings out of your boot log
 
   | `:expiry` | 2.x | 3.0 |
   | --------- | --- | --- |
-  | 1ms | 2 attempts, 103ms | 2 attempts, 4ms |
-  | 50ms | 2 attempts, 100ms | 4 attempts, 51ms |
-  | 250ms | 6 attempts, 254ms | 6 attempts, 250ms — unchanged |
-  | 1000ms | 8 attempts, 1001ms | 8 attempts, 1000ms — unchanged |
+  | 1ms | 2 attempts, 103ms | 2 attempts, 1ms |
+  | 50ms | 2 attempts, 100ms | 4 attempts, 50ms |
+  | 250ms | 6 attempts, 250ms | 6 attempts, 250ms — unchanged |
+  | 1000ms | 8 attempts, 1000ms | 8 attempts, 1000ms — unchanged |
 
   **Only budgets under ~100ms are affected**; the floor never engaged above that.
   Note that such a budget changes in both directions at once — more attempts, in
@@ -930,7 +930,7 @@ a minute which of these affect you, by grepping two strings out of your boot log
   retries, which reads like a wall-clock bound on the call. It is evaluated
   *between* attempts, so it bounds when the next attempt starts and never how
   long the current one runs. Measured with `max_attempts: 4, expiry: 100` against
-  a function sleeping 300ms per attempt: 2 attempts, **706ms total** — seven times
+  a function sleeping 300ms per attempt: 2 attempts, **621ms total** — six times
   the budget. A function that never returns is never bounded by it at all. Both
   measurements are now pinned by tests.
 - **The circuit breaker guide names what the library does not bound** — attempt
@@ -1325,7 +1325,7 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
   (matching `start/2`), not only atoms, and is idempotent — it is safe to call
   on a service that was never started or has already been stopped.
 
-## 1.1.4 - 2024-01-04
+## [1.1.4] - 2024-01-04
 ### Fixed
 - Replace use of deprecated `System.stacktrace/0` with `__STACKTRACE__/0` ([PR #17 from @iperks](https://github.com/jvoegele/external_service/pull/17))
 
@@ -1379,6 +1379,8 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 [2.2.0]: https://github.com/jvoegele/external_service/compare/2.1.0...2.2.0
 [2.1.0]: https://github.com/jvoegele/external_service/compare/2.0.0...2.1.0
 [2.0.0]: https://github.com/jvoegele/external_service/compare/1.1.4...2.0.0
+[1.1.4]: https://github.com/jvoegele/external_service/compare/1.1.3...1.1.4
+[1.1.3]: https://github.com/jvoegele/external_service/compare/1.1.2...1.1.3
 [1.1.2]: https://github.com/jvoegele/external_service/compare/1.1.1...1.1.2
 [1.1.1]: https://github.com/jvoegele/external_service/compare/1.1.0...1.1.1
 [1.1.0]: https://github.com/jvoegele/external_service/compare/1.0.1...1.1.0

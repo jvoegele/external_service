@@ -48,9 +48,10 @@ managing the underlying fuse for you — you never call `:fuse.ask` or
 ### Rate limiting
 
 Many services impose a request quota. `ExternalService` can keep you under it
-automatically with a built-in token bucket: excess calls sleep until there is
-room, rather than failing. The default backend meters each node's own traffic;
-a pluggable backend can instead enforce one limit across a whole cluster. See
+automatically with a built-in token bucket: excess calls sleep for up to a
+bounded budget to absorb bursts, then fail fast with a structured error rather
+than piling up. The default backend meters each node's own traffic; a
+pluggable backend can instead enforce one limit across a whole cluster. See
 [Rate limiting](rate-limiting.md).
 
 ### Concurrency limiting

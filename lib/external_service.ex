@@ -1489,7 +1489,7 @@ defmodule ExternalService do
       @doc "Resets the circuit breaker. See `ExternalService.reset/1`."
       def reset, do: ExternalService.reset(@__external_service__)
 
-      @doc "Resets the circuit breaker and the rate limiter. See `ExternalService.reset_all/1`."
+      @doc "Resets the circuit breaker, the rate limiter, and the concurrency limit. See `ExternalService.reset_all/1`."
       def reset_all, do: ExternalService.reset_all(@__external_service__)
     end
   end

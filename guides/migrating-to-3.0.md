@@ -131,9 +131,10 @@ rate_limit: [limit: 50, per: 1_000, wait: :infinity]
 The new default is **one window — `:per`, capped at 5 seconds** — rather than
 `false`. One window is the most a limiter can ask you to wait for the next
 refill, so it absorbs a burst exactly and no more: measured at
-`limit: 50, per: 1_000`, a 2× instantaneous burst goes from 50% shed to 0%, while
-a *sustained* 2× overload still sheds around 15%. Shedding is the right answer to
-real overload; the wait exists to absorb bursts.
+`limit: 50, per: 1_000`, a 2× instantaneous burst goes from 50% shed to about 1%,
+while a *sustained* 2× overload still sheds about 9% (see the measured table in
+[Rate limiting](rate-limiting.md)). Shedding is the right answer to real
+overload; the wait exists to absorb bursts.
 
 `wait: false` was rejected for the opposite reason — it sheds half of a burst a
 healthy service should absorb, which makes bursty-but-fine traffic look like an
@@ -151,9 +152,9 @@ produces exactly the same delays as 2.x:
 
 | `:expiry` | 2.x                              | 3.0                              |
 | --------- | -------------------------------- | -------------------------------- |
-| 50ms      | 2 attempts, 100ms slept          | 4 attempts, 51ms slept            |
-| 250ms     | 6 attempts, 254ms slept          | 6 attempts, 250ms slept — same   |
-| 1000ms    | 8 attempts, 1001ms slept         | 8 attempts, 1000ms slept — same  |
+| 50ms      | 2 attempts, 100ms slept          | 4 attempts, 50ms slept            |
+| 250ms     | 6 attempts, 250ms slept          | 6 attempts, 250ms slept — same   |
+| 1000ms    | 8 attempts, 1000ms slept         | 8 attempts, 1000ms slept — same  |
 
 Note that the change runs in both directions at once: *more* attempts, in *less*
 time. A tight budget now does what it says — it retries as fast as the backoff
