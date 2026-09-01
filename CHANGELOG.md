@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
   correct framing in the paragraph above it rather than by what its own sentences say standing
   alone — the same standard the rest of that audit held every other passage to.
 
+### Added
+
+- **A "Choosing `:per_call` or `:per_attempt`" section in the Circuit Breakers guide.** `:melt`'s
+  two values were documented mechanically — in the `@type melt` typedoc and the `:melt` schema
+  option — but never given advisory treatment: why you'd reach for `:per_attempt` beyond
+  migration compatibility, and what it costs. Covers the two genuine reasons (faster reaction to
+  attempt-level failure, and being the only way to retry genuinely without bound), the real cost
+  (a single call can trip its own breaker, verified live: `tolerate: 3, melt: :per_attempt` with
+  `max_attempts: 8` opens on a lone call's 4th attempt and sheds the remaining four as
+  `CircuitBreakerOpen`), and the historical trap `:within: :auto`'s calls-to-open-aware sizing
+  now prevents (issue #112) — reopened only if you hand-set `:within` without doing the same
+  arithmetic. The `melt()` typedoc, the `:melt` schema doc, and tuning.md's brief mention now
+  all point to it.
+
 ## [3.2.2] - 2026-09-01
 
 Dependency maintenance. Nothing about a guarded call changes.
