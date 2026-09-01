@@ -266,13 +266,23 @@ By default sleeping uses `Process.sleep/1`. You can substitute your own with
 otherwise sleep:
 
 ```elixir
-use ExternalService,
-  rate_limit: [limit: 100, per: :timer.seconds(1), wait: :timer.seconds(1)],
-  sleep_function: fn ms ->
+defmodule MyApp.RateLimitHooks do
+  def record_and_sleep(ms) do
     :ok = MyApp.Metrics.record_throttle(ms)
     Process.sleep(ms)
   end
+end
+
+use ExternalService,
+  rate_limit: [limit: 100, per: :timer.seconds(1), wait: :timer.seconds(1)],
+  sleep_function: &MyApp.RateLimitHooks.record_and_sleep/1
 ```
+
+`use ExternalService` stores its options in a module attribute, which cannot
+hold a closure — only a named function capture (`&Mod.fun/arity`) survives
+that. `ExternalService.start/2` has no such restriction and accepts an
+anonymous function directly. See the "Anonymous functions and `use
+ExternalService`" callout in [Retries](retries.md#retrying-on-raised-exceptions).
 
 This is an **instrumentation hook**, not a way to skip the wait.
 

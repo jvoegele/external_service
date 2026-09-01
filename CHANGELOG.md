@@ -516,9 +516,9 @@ a minute which of these affect you, by grepping two strings out of your boot log
 
   | offered load | `wait: false` | one window | 2 × window |
   | --- | --- | --- | --- |
-  | 2× instantaneous burst | 50% shed | **0% shed** | 0% shed |
-  | 2× sustained | 27–35% shed | 15–17% shed | 1–5% shed, ~2× the latency |
-  | 6× sustained | 71–75% shed | 64–67% shed | 55–58% shed |
+  | 2× instantaneous burst | 50% shed | **about 1% shed** | less |
+  | 2× sustained | 27–35% shed | about 9% shed | less, at roughly 2× the latency |
+  | 6× sustained | 71–75% shed | about 50% shed | less, at roughly 2× the latency |
 
   A burst is absorbed completely; sustained overload is still shed, which is the
   point — shedding is the right answer to real overload, and the larger budget

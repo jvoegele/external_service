@@ -22,7 +22,7 @@ Define a module per service, configure it declaratively, and **start it under a 
 defmodule MyApp.Stripe do
   use ExternalService,
     retry: [max_attempts: 5, backoff: :exponential, base: 100, cap: 2_000, jitter: true],
-    circuit_breaker: [tolerate: 5, within: :timer.seconds(1), reset: :timer.seconds(5)],
+    circuit_breaker: [tolerate: 5, reset: :timer.seconds(5)],
     rate_limit: [limit: 100, per: :timer.seconds(1), wait: :timer.seconds(1)]
 
   def charge(params) do
@@ -115,9 +115,10 @@ per-attempt melting with `circuit_breaker: [melt: :per_attempt]`, but that is no
 The window still has to be wide enough to *contain* those calls. A failing call can take up to
 its own retry window to give up — 1.5 s here — so `:tolerate + 1` of those have to fit inside
 `:within`. If 6 calls are needed to open the breaker and each can take 1.5 s, the melts can spread
-over up to ~9 s — so a `within: 5_000` breaker might **never open**, silently, with nothing
-raising and no log line. Leaving `:within` unset lets it default to `:auto`, which sizes it from
-the retry options for you.
+over up to ~9 s — so a hand-set `within: 5_000` breaker might **never open** for a caller making
+these calls one after another (concurrent callers still can). Leaving `:within` unset lets it
+default to `:auto`, which sizes it from the retry options for you — and `ConfigCheck` (below)
+catches the hand-set case at compile time and at start, so this does not fail silently either way.
 
 Do not hand-tune this. Ask the library:
 
