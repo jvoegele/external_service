@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Circuit Breakers' "Melt and retry go together for exceptions" admonition described per-attempt
+  melting, not the actual per-call semantics.** "An exception `:retry_exceptions` matches is
+  retried and melts the breaker" and "[`:retry`/`:retry_on` matches] always melt the breaker"
+  read, correctly, as unconditional per-occurrence claims — and are false under the default
+  `:melt: :per_call`: verified live that a call retrying several times and then succeeding melts
+  nothing at all, however many of its attempts asked for another try. Only the call giving up
+  melts, once. This survived the 3.2.1 documentation audit, which judged the passage by the
+  correct framing in the paragraph above it rather than by what its own sentences say standing
+  alone — the same standard the rest of that audit held every other passage to.
+
 ## [3.2.2] - 2026-09-01
 
 Dependency maintenance. Nothing about a guarded call changes.

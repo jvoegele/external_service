@@ -66,14 +66,18 @@ retrying gives up, where a failing attempt is one in which:
 > #### Melt and retry go together for exceptions {: .info}
 >
 > The `:retry_exceptions` retry option governs **both** whether a raised exception
-> is retried **and** whether it melts the breaker. An exception `:retry_exceptions`
-> matches is retried and melts the breaker; one it does not match is neither
-> retried nor melted — it propagates to the caller and leaves the breaker
-> untouched.
+> is retried **and** whether it counts toward melting the breaker — the two are
+> the same predicate, not two separately-configurable things. An exception
+> `:retry_exceptions` matches is retried, and counts as a failing attempt if the
+> call goes on to give up; one it does not match is never retried at all — it
+> propagates to the caller on the spot, and leaves the breaker untouched.
 >
-> Explicit `:retry` / `{:retry, reason}` return values, and results matched by the
-> `:retry_on` predicate, always melt the breaker — they are ways of asking for
-> another attempt.
+> The same is true of explicit `:retry` / `{:retry, reason}` return values and
+> results matched by the `:retry_on` predicate: they are ways of asking for
+> another attempt, not ways of melting the breaker directly. None of these melt
+> anything by themselves — a call that retries several times and then succeeds
+> melts nothing at all, however many of its attempts asked for another try. What
+> melts the breaker, once, is the call giving up: see the `:tolerate` note below.
 
 Values your function simply returns — including its own `{:error, reason}` — are
 successes as far as the breaker is concerned and do not melt it.
