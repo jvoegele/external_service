@@ -24,7 +24,7 @@ call fn ->
     {:ok, %{status: 200} = resp}            -> {:ok, resp}
     {:ok, %{status: s}} when s in 500..599  -> {:retry, s}   # retry server errors
     {:ok, %{status: 429}}                   -> :retry        # retry throttling
-    {:ok, %{status: 4xx}} = resp            -> resp          # client error: don't retry
+    {:ok, %{status: s}} = resp when s in 400..499 -> resp     # client error: don't retry
     {:error, reason}                        -> {:error, reason}
   end
 end

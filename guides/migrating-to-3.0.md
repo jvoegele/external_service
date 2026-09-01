@@ -208,7 +208,7 @@ calls that is easier than before. For slow ones it is not:
 circuit_breaker: [tolerate: 20, within: :timer.seconds(30)]
 
 # 3.0: three failing calls take about 90s, so a 30s window never sees them all.
-circuit_breaker: [tolerate: 3, within: :timer.seconds(120)]
+circuit_breaker: [tolerate: 3, within: :timer.seconds(180)]
 ```
 
 **`:within` now defaults to `:auto`, which does this arithmetic for you** — it

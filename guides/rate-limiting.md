@@ -99,9 +99,10 @@ converts overload into latency and process growth.
 One window is the value because it is the most a limiter can ask you to wait for
 the next refill, so it absorbs a burst exactly and no more. Measured at
 `limit: 50, per: 1_000` against an instantaneous burst of twice the limit, a
-one-window budget takes shedding from 50% to 0% — while a *sustained* 2x overload
-still sheds around 15%, which is the point. Shedding is the right answer to real
-overload; the wait exists to absorb bursts, not to hide saturation.
+one-window budget takes shedding from 50% to about 1% — while a *sustained* 2x
+overload still sheds about 9%, which is the point (see the measured table
+below). Shedding is the right answer to real overload; the wait exists to
+absorb bursts, not to hide saturation.
 
 The cap matters for a service with a large window. A per-minute quota
 (`limit: 100, per: :timer.minutes(1)`) would otherwise block a caller for a full

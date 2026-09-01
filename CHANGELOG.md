@@ -28,7 +28,7 @@ Agent usage rules, shipped in the package. Nothing about a guarded call changes.
     and HEAD only, so a POST behaves differently under identical configuration);
   * `max_attempts: 5` at the default `base: 10` is 150 ms of total waiting — raise `:base`, not
     the attempt count;
-  * `:tolerate` counts failed **attempts**, and the window has to be wide enough to contain the
+  * `:tolerate` counts failed **calls**, and the window has to be wide enough to contain the
     melts or the breaker never opens, silently — reach for `explain/1`, `simulate/3` and
     `ConfigCheck` rather than hand-tuning;
   * `:wait` depends on **where the call is made**, not on the service;
@@ -1362,7 +1362,7 @@ The 2.0 line modernizes the project and introduces breaking changes. See the
 - Add new ExternalService.Gateway module for module-based service gateways.
 - Add this changelog...better late than never!
 
-[Unreleased]: https://github.com/jvoegele/external_service/compare/3.1.0...HEAD
+[Unreleased]: https://github.com/jvoegele/external_service/compare/3.2.0...HEAD
 [3.2.0]: https://github.com/jvoegele/external_service/compare/3.1.0...3.2.0
 [3.1.0]: https://github.com/jvoegele/external_service/compare/3.0.0...3.1.0
 [3.0.0]: https://github.com/jvoegele/external_service/compare/3.0.0-rc.4...3.0.0

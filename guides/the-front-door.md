@@ -58,7 +58,7 @@ Supervisor.start_link(children, strategy: :one_for_one)
 ```
 
 Under the hood the generated `start_link/1` installs the service's circuit
-breaker and rate limiter. This is the only "process" the front door adds, and it
+breaker, rate limiter, and concurrency limit. This is the only "process" the front door adds, and it
 exists purely to tie the service's lifecycle to your supervision tree.
 
 ## Per-environment overrides

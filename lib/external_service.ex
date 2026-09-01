@@ -57,6 +57,18 @@ defmodule ExternalService do
       throttled and put to sleep to stay within the configured rate limit.
       * Measurements: `:sleep_time` (milliseconds)
       * Metadata: `:service`
+
+    * `[:external_service, :concurrency, :rejected]` - emitted when a call is
+      shed because the service's concurrency limit was fully in use.
+      * Measurements: `:limit`, `:wait_time` (milliseconds spent waiting, `0`
+        unless a `:wait` budget is configured)
+      * Metadata: `:service`
+
+    * `[:external_service, :concurrency, :waited]` - emitted when a call had to
+      wait for a slot but got one before its `:wait` budget ran out. Calls served
+      without waiting emit nothing.
+      * Measurements: `:limit`, `:wait_time` (milliseconds waited)
+      * Metadata: `:service`
   """
 
   alias ExternalService.CircuitBreaker
@@ -599,8 +611,8 @@ defmodule ExternalService do
 
         circuit breaker
           opens after      4 failing calls
-          counting window  10.0s
-          resets after     60.0s
+          counting window  10s
+          resets after     60s
           backend          ExternalService.CircuitBreaker.Fuse
 
         rate limit
@@ -1362,7 +1374,7 @@ defmodule ExternalService do
   ## Options
 
   Accepts the same options as `start/2` (`:circuit_breaker`, `:rate_limit`,
-  `:retry`, `:sleep_function`), plus:
+  `:concurrency`, `:retry`, `:sleep_function`), plus:
 
     * `:name` - the term that identifies the service. Defaults to the module name.
 
@@ -1397,8 +1409,8 @@ defmodule ExternalService do
       end
 
       @doc """
-      Starts the service (installing its circuit breaker and rate limiter) linked
-      to the current process.
+      Starts the service (installing its circuit breaker, rate limiter, and
+      concurrency limit, if configured) linked to the current process.
 
       `overrides` are deep merged with the options given to `use ExternalService`.
       """

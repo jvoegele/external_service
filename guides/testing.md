@@ -9,9 +9,11 @@ ask you to hand-write — `use ExternalService.Test` imports them, and each sect
 below uses them where they apply. The explanations stay, because the helpers
 replace the typing, not the model.
 
-Every example here is executed as part of this library's own suite
+Most examples here are executed as part of this library's own suite
 (`test/testing_guide_examples_test.exs`), so they compile and their assertions
-hold.
+hold. The `ExternalService.simulate/3` examples below are the exception —
+`MyApp.Payments` is illustrative, standing in for whatever service you'd
+actually simulate, so those two are not themselves pinned by a test.
 
 ## The one thing to know first: service state is global
 

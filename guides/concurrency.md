@@ -202,9 +202,16 @@ replacing handling of the error itself.
 
 Every rejected call emits an
 `[:external_service, :concurrency, :rejected]` telemetry event, with the
-configured `:limit` in its measurements and the `:service` in its metadata.
-A steady trickle usually means the limit is too low for normal traffic; a sudden
-spike is the dependency slowing down. See the [Telemetry](telemetry.md) guide.
+configured `:limit` and `:wait_time` (milliseconds spent waiting, `0` unless a
+`:wait` budget is configured) in its measurements and the `:service` in its
+metadata. A steady trickle usually means the limit is too low for normal
+traffic; a sudden spike is the dependency slowing down.
+
+A call that had to wait for a slot but got one before its `:wait` budget ran out
+instead emits `[:external_service, :concurrency, :waited]`, with `:limit` and
+`:wait_time` (milliseconds actually waited) in its measurements. Calls served
+without waiting emit nothing, so this measures only the bursts a `:wait` budget
+is absorbing. See the [Telemetry](telemetry.md) guide.
 
 ## How it works
 

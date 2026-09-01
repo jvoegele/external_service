@@ -18,8 +18,8 @@ defmodule ExternalService.Insights do
 
       [ExternalService.Insights] :payments has failed 14 consecutive calls over
       21.7s with its circuit breaker still closed. It tolerates 5 failures within
-      10s, but these are arriving about 1.5s apart, so at most 6 are ever counted
-      together. Try `circuit_breaker: [within: :timer.seconds(31)]`.
+      10s, but these are arriving about 1.7s apart, so at most 6 are ever counted
+      together. Try `circuit_breaker: [within: :timer.seconds(21)]`.
 
   ## Attaching
 

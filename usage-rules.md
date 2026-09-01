@@ -8,7 +8,7 @@ apply on every call.
 
 ```elixir
 # mix.exs
-{:external_service, "~> 3.1"}
+{:external_service, "~> 3.2"}
 ```
 
 ```elixir
@@ -22,7 +22,7 @@ Define a module per service, configure it declaratively, and **start it under a 
 defmodule MyApp.Stripe do
   use ExternalService,
     retry: [max_attempts: 5, backoff: :exponential, base: 100, cap: 2_000, jitter: true],
-    circuit_breaker: [tolerate: 5, within: :timer.seconds(30), reset: :timer.seconds(5)],
+    circuit_breaker: [tolerate: 5, within: :timer.seconds(1), reset: :timer.seconds(5)],
     rate_limit: [limit: 100, per: :timer.seconds(1), wait: :timer.seconds(1)]
 
   def charge(params) do
@@ -77,8 +77,9 @@ end
 ### Your HTTP client's own retries multiply against these
 
 If the client you call inside `call/1` retries on its own, the two compound: `max_attempts: 3`
-around a client doing 3 retries is up to 9 requests, with two independent backoff schedules
-interleaved, and the breaker melting on a count you did not choose.
+around a client that retries 3 times per attempt (1 initial + 3 retries = 4 requests) is up to
+12 requests, with two independent backoff schedules interleaved, and the breaker melting on a
+count you did not choose.
 
 `Req` is the common case — it retries by default (`retry: :safe_transient`, which covers **GET
 and HEAD only**, so a POST behaves differently from a GET under the same configuration). Turn the
@@ -191,19 +192,20 @@ after 3 attempts" — which is true and rarely actionable. The failure a user ca
 about is the `:cause`:
 
 ```elixir
-# the deepest Errata error — has a code, a context and a classification to render or report
-Errata.root_error(error)
+# one level down — the retry reason, if it was an exception
+Errata.cause(error)
 
-# the foreign original underneath it — :econnrefused, an %Mint.TransportError{}, ... or nil
-Errata.root_error(error) |> Errata.cause()
+# the deepest cause, following the chain — the foreign original underneath
+# everything, such as :econnrefused or a %Mint.TransportError{}, or nil
+Errata.root_cause(error)
 ```
 
 That turns "could not be completed after 3 attempts" into "connection refused", and works across
 library boundaries — `RetriesExhausted` wraps your error and neither knows about the other.
 
-Do not hand-roll a recursive unwrap loop, and do not reach for `Errata.root_cause/1`: it is
-deprecated because it returns an Errata error *or* a foreign value depending on how the chain
-ends, leaving the caller to work out which it got. See the [Using Errata](guides/errata.md) guide — an application's own Errata
+Do not hand-roll a recursive unwrap loop — `root_cause/1` already walks the chain for you. Both
+raise `ArgumentError` if given something that isn't an Errata error. See the
+[Using Errata](guides/errata.md) guide — an application's own Errata
 errors can also drive retries via `:retry_on` and `retryable?/1`, which puts the retry decision
 in the error type rather than in a branch on the shape of what came back.
 

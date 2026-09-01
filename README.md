@@ -119,14 +119,15 @@ with these guides:
   circuit breaker and rate limit across a cluster.
 - **[Flow Pipelines](guides/flow.md)** — guarded calls inside a `Flow`.
 - **[Cheatsheet](guides/cheatsheet.cheatmd)** — a one-page reference.
-- **[Migrating to 3.0](guides/migrating-to-3.0.md)** — upgrading from 2.x.
 - **[Migrating to 2.0](guides/migrating-to-2.0.md)** — upgrading from 1.x.
+- **[Migrating to 3.0](guides/migrating-to-3.0.md)** — upgrading from 2.x.
 - **[About](guides/about.md)** — the ideas behind the library and its history.
 
 ## Upgrading
 
-Version 3.0 changes several defaults and one behavior, and renames nothing: your
-code compiles unchanged and behaves differently. Start with the
+Version 3.0 changes four defaults and behaviors, and makes one dependency
+optional, and renames nothing: your code compiles unchanged and behaves
+differently. Start with the
 [3.0 migration guide](guides/migrating-to-3.0.md), whose first section tells you
 in about a minute which changes affect you.
 
